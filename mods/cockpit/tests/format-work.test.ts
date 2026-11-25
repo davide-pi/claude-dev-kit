@@ -1,0 +1,291 @@
+import { expect, test } from 'claude-code/testing'
+
+import { spanText } from '../hooks/shared'
+import {
+  aheadBehindSpans,
+  azureRepo,
+  claimsOf,
+  editedPathOf,
+  isAzureRemote,
+  isDefaultBranch,
+  isGithubRemote,
+  parseAzurePr,
+  parseCreatedPr,
+  parseDefaultBranch,
+  parseDoneClaims,
+  parseEdited,
+  parseGitStatus,
+  parseGithubPr,
+  parseSavedPrs,
+  parseWorktree,
+  recordEdited,
+  repoRelative,
+  safeUrl,
+  upsertPr,
+} from '../hooks/work'
+
+test('parseGitStatus counts staged, modified, untracked', () => {
+  const out = '## feature/x...origin/feature/x [ahead 1]\nM  a.ts\n M b.ts\nMM c.ts\n?? d.ts\n'
+  expect(parseGitStatus(out)).toEqual({ branch: 'feature/x', isDetached: false, staged: 2, modified: 2, untracked: 1, upstream: 'origin/feature/x', ahead: 1, behind: 0 })
+  expect(parseGitStatus('## feature/x\nM  a.ts\n')).toEqual({ branch: 'feature/x', isDetached: false, staged: 1, modified: 0, untracked: 0 })
+  expect(parseGitStatus('## No commits yet on main\n')?.branch).toBe('main')
+  // a detached HEAD has no branch: git says `HEAD (no branch)`
+  expect(parseGitStatus('## HEAD (no branch)\n M a.ts\n')).toEqual({ branch: 'HEAD', isDetached: true, staged: 0, modified: 1, untracked: 0 })
+  expect(parseGitStatus('')).toBeUndefined()
+})
+
+test('parseWorktree is set only in a linked worktree', () => {
+  expect(parseWorktree('.git\n.git\n/work/repo')).toBeUndefined()
+  expect(parseWorktree('/work/repo/.git/worktrees/w\n/work/repo/.git\n/work/wt/w')).toBe('/work/wt/w')
+})
+
+test('isDefaultBranch: main, master, develop and the repo own default, nothing else', () => {
+  for (const branch of ['main', 'master', 'develop']) expect(isDefaultBranch(branch)).toBe(true)
+  expect(isDefaultBranch('trunk')).toBe(false)
+  expect(isDefaultBranch('trunk', 'trunk')).toBe(true)
+  expect(isDefaultBranch('feature/trunk', 'trunk')).toBe(false)
+})
+
+test('parseGitStatus: the upstream with the commits ahead and behind it', () => {
+  expect(parseGitStatus('## feature/x...origin/feature/x [ahead 2, behind 1]\n')).toMatchObject({ branch: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 1 })
+  expect(parseGitStatus('## feature/x...origin/feature/x [ahead 3]\n')).toMatchObject({ ahead: 3, behind: 0 })
+  expect(parseGitStatus('## feature/x...origin/feature/x [behind 4]\n')).toMatchObject({ ahead: 0, behind: 4 })
+  expect(parseGitStatus('## feature/x...origin/feature/x\n')).toMatchObject({ upstream: 'origin/feature/x', ahead: 0, behind: 0 })
+  // no upstream, or one that is gone: nothing to count against
+  expect(parseGitStatus('## feature/x\n')?.upstream).toBeUndefined()
+  expect(parseGitStatus('## feature/x...origin/feature/x [gone]\n')?.upstream).toBeUndefined()
+  expect(parseGitStatus('## HEAD (no branch)\n')?.upstream).toBeUndefined()
+})
+
+
+test('parseGithubPr: a PR as a link: number, title and address; anything else is none', () => {
+  const json = (o: object) => JSON.stringify({ number: 42, title: 'Fix', url: 'https://github.com/example/orders/pull/42', state: 'MERGED', reviewDecision: 'APPROVED', ...o })
+  // no review or checks: what a link needs and the state that groups it
+  expect(parseGithubPr(json({}))).toEqual({ number: 42, title: 'Fix', url: 'https://github.com/example/orders/pull/42', state: 'merged' })
+  expect(parseGithubPr(json({ state: 'OPEN' }))?.state).toBe('open')
+  expect(parseGithubPr(json({ state: 'OPEN', isDraft: true }))?.state).toBe('draft')
+  expect(parseGithubPr(json({ state: 'CLOSED' }))?.state).toBe('closed')
+  expect(parseGithubPr(json({ state: 'odd' }))?.state).toBeUndefined()
+  expect(parseGithubPr(json({ url: undefined }))).toEqual({ number: 42, title: 'Fix', state: 'merged' })
+  expect(parseGithubPr(json({ url: 'javascript:alert(1)' }))).toEqual({ number: 42, title: 'Fix', state: 'merged' })
+  expect(parseGithubPr(json({ title: 7 }))?.title).toBe('')
+  expect(parseGithubPr(json({ number: 0 }))).toBeUndefined()
+  expect(parseGithubPr(json({ number: '42' }))).toBeUndefined()
+  expect(parseGithubPr('{}')).toBeUndefined()
+  expect(parseGithubPr('not json')).toBeUndefined()
+  expect(parseGithubPr('')).toBeUndefined()
+})
+
+test('parseAzurePr: the first PR of az repos pr list as a link: number, title and the address of its repository', () => {
+  const list = (o: object) => JSON.stringify([{ pullRequestId: 7, title: 'Faster', status: 'completed', reviewers: [{ vote: 10 }], ...o }])
+  expect(parseAzurePr(list({}))).toEqual({ number: 7, title: 'Faster', state: 'merged' })
+  expect(parseAzurePr(list({ status: 'active' }))?.state).toBe('open')
+  expect(parseAzurePr(list({ status: 'active', isDraft: true }))?.state).toBe('draft')
+  expect(parseAzurePr(list({ status: 'abandoned' }))?.state).toBe('closed')
+  expect(parseAzurePr(list({ repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } }))?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
+  expect(parseAzurePr(list({ pullRequestId: 'x' }))).toBeUndefined()
+  expect(parseAzurePr('[]')).toBeUndefined()
+  expect(parseAzurePr('{}')).toBeUndefined()
+  expect(parseAzurePr('not json')).toBeUndefined()
+})
+
+test('isAzureRemote and azureRepo: the project and repository an Azure DevOps remote names', () => {
+  const SSH_USER = 'git' // kept apart so the URLs below are not read as e-mail addresses
+  const https = 'https://dev.azure.com/<org>/proj/_git/orders'
+  const ssh = `${SSH_USER}@ssh.dev.azure.com:v3/<org>/proj/orders`
+  const old = 'https://<org>.visualstudio.com/proj/_git/orders'
+  for (const url of [https, ssh, old]) {
+    expect(isAzureRemote(`${url}\n`)).toBe(true)
+    expect(azureRepo(url)).toEqual({ project: 'proj', repo: 'orders' })
+  }
+  expect(azureRepo('https://dev.azure.com/<org>/My%20Proj/_git/my%20repo')).toEqual({ project: 'My Proj', repo: 'my repo' })
+  // the project's default repository carries the project's name
+  expect(azureRepo('https://dev.azure.com/<org>/_git/orders')).toEqual({ repo: 'orders' })
+  expect(isAzureRemote('https://github.com/example/orders')).toBe(false)
+  expect(isAzureRemote('')).toBe(false)
+  expect(azureRepo('https://github.com/example/orders')).toBeUndefined()
+})
+
+
+
+
+
+test('parseDefaultBranch: the branch origin/HEAD points at, without the remote', () => {
+  expect(parseDefaultBranch('origin/main\n')).toBe('main')
+  expect(parseDefaultBranch('origin/release/2026\n')).toBe('release/2026')
+  expect(parseDefaultBranch('')).toBeUndefined()
+  expect(parseDefaultBranch('upstream/main')).toBeUndefined()
+})
+
+test('isGithubRemote: ssh and https URLs of github.com, nothing else', () => {
+  const SSH_USER = 'git' // the user part, kept apart so the URLs below are not read as e-mail addresses
+  expect(isGithubRemote(`${SSH_USER}@github.com:example/orders.git\n`)).toBe(true)
+  expect(isGithubRemote('https://github.com/example/orders')).toBe(true)
+  expect(isGithubRemote(`https://${SSH_USER}@github.com/example/orders.git`)).toBe(true)
+  expect(isGithubRemote(`ssh://${SSH_USER}@github.com/example/orders.git`)).toBe(true)
+  expect(isGithubRemote('https://dev.azure.com/<org>/proj/_git/orders')).toBe(false)
+  expect(isGithubRemote(`${SSH_USER}@ssh.dev.azure.com:v3/<org>/proj/orders`)).toBe(false)
+  expect(isGithubRemote('https://notgithub.com/example/orders')).toBe(false)
+  expect(isGithubRemote('')).toBe(false)
+})
+
+// ── In progress: the done-claim log ──
+
+test('parseDoneClaims: the log lines that were blocks, newest first, with their session; a line without time or rule, and a rule that only counted, is skipped', () => {
+  const line = (n: number, rule = 'unproven-row', session = 's') => JSON.stringify({ at: `2026-10-22T0${n}:00:00.000Z`, session, rule, word: 'fatto', excerpt: `claim ${n}` })
+  const text = [line(1), 'not json', line(2, 'tail-cut'), JSON.stringify({ rule: 'x' }), line(3, 'shell-ran'), line(4, 'tail-truncated'), line(5, 'claim-without-evidence', 'other'), ''].join('\n')
+  expect(parseDoneClaims(text, 's').map(c => c.excerpt)).toEqual(['claim 2', 'claim 1'])
+  expect(parseDoneClaims(text, 's')[0]).toEqual({ at: '2026-10-22T02:00:00.000Z', session: 's', rule: 'tail-cut', excerpt: 'claim 2' })
+  expect(parseDoneClaims(text, 'other').map(c => c.excerpt)).toEqual(['claim 5'])
+  expect(parseDoneClaims(text, undefined)).toEqual([])
+  expect(parseDoneClaims('', 's')).toEqual([])
+  expect(parseDoneClaims('{}', 's')).toEqual([])
+})
+
+test('parseDoneClaims: the session is filtered before the last entries are kept, so a busy other session cannot push its blocks out', () => {
+  const line = (n: number, session: string) => JSON.stringify({ at: new Date(2026, 9, 22, 8, n).toISOString(), session, rule: 'unproven-row', excerpt: `${session} ${n}` })
+  const text = [line(1, 'mine'), line(2, 'mine'), ...Array.from({ length: 40 }, (_, i) => line(3 + i, 'busy'))].join('\n')
+  expect(parseDoneClaims(text, 'mine').map(c => c.excerpt)).toEqual(['mine 2', 'mine 1'])
+  expect(parseDoneClaims(text, 'busy')).toHaveLength(30)
+})
+
+test('claimsOf: the last three blocks of the session, newest first; none without a session', () => {
+  const claim = (at: string, session?: string) => ({ at, ...(session && { session }), rule: 'unproven-row', excerpt: at })
+  const list = [claim('5', 'b'), claim('4', 'a'), claim('3'), claim('2', 'a'), claim('1', 'a'), claim('0', 'a')]
+  expect(claimsOf(list, 'a').map(c => c.at)).toEqual(['4', '2', '1'])
+  expect(claimsOf(list, 'c')).toEqual([])
+  expect(claimsOf(list, undefined)).toEqual([])
+  expect(claimsOf(undefined, 'a')).toEqual([])
+})
+
+test('aheadBehindSpans: the commits ahead and behind the upstream, nothing when level or without one', () => {
+  const git = { branch: 'x', staged: 0, modified: 0, untracked: 0 }
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 2, behind: 1 }))).toBe(' 󰁝2 󰁅1')
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 3, behind: 0 }))).toBe(' 󰁝3')
+  expect(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 0, behind: 0 })).toEqual([])
+  expect(aheadBehindSpans(git)).toEqual([])
+})
+
+test('parseCreatedPr: the pull request a gh or az create printed, with the title the command gave; nothing for any other command or output', () => {
+  const GH = 'https://github.com/example/orders/pull/42'
+  expect(parseCreatedPr('gh pr create --title "Add filter" --body "x"', `Creating...\n${GH}\n`)).toEqual({ number: 42, title: 'Add filter', url: GH })
+  expect(parseCreatedPr("gh pr create -t 'Add filter' --draft", GH)).toEqual({ number: 42, title: 'Add filter', url: GH })
+  expect(parseCreatedPr('gh pr create --fill', GH)?.title).toBe('')
+  expect(parseCreatedPr('gh pr create --title "x"', 'no url here')).toBeUndefined()
+  expect(parseCreatedPr('gh pr view --title "x"', GH)).toBeUndefined()
+  const az = JSON.stringify({ pullRequestId: 9, title: 'Faster', status: 'active', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } })
+  expect(parseCreatedPr('az repos pr create --title Faster --source-branch x', az)).toEqual({ number: 9, title: 'Faster', url: 'https://dev.azure.com/o/p/_git/r/pullrequest/9' })
+  expect(parseCreatedPr('az repos pr create', JSON.stringify({ pullRequestId: 9, title: 'No web url' }))).toEqual({ number: 9, title: 'No web url' })
+  expect(parseCreatedPr('az repos pr create', 'ERROR: failed')).toBeUndefined()
+  // a --query that drops the repository: the address comes from the command's organization, project and repository
+  const bare = JSON.stringify({ pullRequestId: 2830, title: 'Build' })
+  const url = 'https://dev.azure.com/contoso/Shop/_git/Shop/pullrequest/2830'
+  expect(parseCreatedPr("az repos pr create --org https://dev.azure.com/contoso/ -p Shop --repository Shop --title 'Build' --query '{id: pullRequestId}'", bare)).toEqual({ number: 2830, title: 'Build', url })
+  expect(parseCreatedPr('az repos pr create --organization contoso --project=Shop -r Shop', bare)?.url).toBe(url)
+  expect(parseCreatedPr('az repos pr create --org https://dev.azure.com/o --project "My Project" --repository r', bare)?.url).toBe('https://dev.azure.com/o/My%20Project/_git/r/pullrequest/2830')
+  // a shell variable or a missing flag names no address
+  expect(parseCreatedPr('az repos pr create --org $org -p Shop --repository Shop', bare)).toEqual({ number: 2830, title: 'Build' })
+  expect(parseCreatedPr('az repos pr create --org o -p Shop', bare)).toEqual({ number: 2830, title: 'Build' })
+  // the record's own web address wins over the flags
+  expect(parseCreatedPr('az repos pr create --org x -p y --repository z', az)?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/9')
+  expect(parseCreatedPr('git status', az)).toBeUndefined()
+})
+
+test('upsertPr: a PR seen again replaces its entry in place (by url, else by number); the list keeps the last ten', () => {
+  const pr = (number: number, extra: object = {}) => ({ number, title: `t${number}`, ...extra })
+  const first = upsertPr(undefined, pr(1, { url: 'u/1' }))
+  const two = upsertPr(first, pr(2))
+  expect(upsertPr(two, pr(1, { url: 'u/1', title: 'renamed' })).map(p => `${p.number}:${p.title}`)).toEqual(['1:renamed', '2:t2'])
+  // a read without a url still finds the entry that has one
+  expect(upsertPr(two, pr(1, { title: 'again' })).map(p => `${p.number}:${p.title}`)).toEqual(['1:again', '2:t2'])
+  // the same number under another url is another PR
+  expect(upsertPr(two, pr(1, { url: 'other/1' }))).toHaveLength(3)
+  let list = first
+  for (let n = 2; n <= 12; n++) list = upsertPr(list, pr(n))
+  expect(list.map(p => p.number)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+})
+
+test('parseSavedPrs: the entries of a state file that have a number and a title, as links; none for anything else', () => {
+  const ok = { number: 7, title: 'Old', url: 'https://github.com/example/orders/pull/7' }
+  expect(parseSavedPrs([{ ...ok, state: 'merged', checks: { passed: 1 } }, { number: 'x', title: 't' }, { title: 'no number' }, null, 5])).toEqual([{ ...ok, state: 'merged' }])
+  expect(parseSavedPrs([{ number: 8, title: 't', state: 'draft' }])[0]?.state).toBe('draft')
+  expect(parseSavedPrs([{ number: 8, title: 't' }])).toEqual([{ number: 8, title: 't' }])
+  expect(parseSavedPrs('nope')).toEqual([])
+  expect(parseSavedPrs(undefined)).toEqual([])
+})
+
+// ── Cockpit v3, phase 5: the system numbers, and the phase 4 follow-ups ──
+
+test('safeUrl: only an http(s) address without control characters; anything else is none', () => {
+  expect(safeUrl('https://github.com/example/orders/pull/42')).toBe('https://github.com/example/orders/pull/42')
+  expect(safeUrl('HTTP://localhost:3000/x')).toBe('HTTP://localhost:3000/x')
+  expect(safeUrl('javascript:alert(1)')).toBeUndefined()
+  expect(safeUrl('file:///etc/passwd')).toBeUndefined()
+  expect(safeUrl('https://')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u001b]8;;x')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\nb')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u007f')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u009b')).toBeUndefined()
+  expect(safeUrl('')).toBeUndefined()
+  expect(safeUrl(42)).toBeUndefined()
+  expect(safeUrl(undefined)).toBeUndefined()
+})
+
+test('safeUrl: every source of a PR address goes through it (gh url, az webUrl, gh create output, saved state)', () => {
+  const gh = (url: string) => parseGithubPr(JSON.stringify({ number: 1, state: 'OPEN', title: 't', url }))
+  expect(gh('https://github.com/example/orders/pull/1')?.url).toBe('https://github.com/example/orders/pull/1')
+  expect(gh('javascript:alert(1)')?.number).toBe(1)
+  expect(gh('javascript:alert(1)')?.url).toBeUndefined()
+  const az = (webUrl: string) => parseAzurePr(JSON.stringify([{ pullRequestId: 7, status: 'active', repository: { webUrl } }]))
+  expect(az('https://dev.azure.com/o/p/_git/r')?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
+  expect(az('javascript:alert(1)')?.url).toBeUndefined()
+  expect(az('ftp://host/r')?.url).toBeUndefined()
+  // a refused address costs the link, never the pull request
+  expect(az('javascript:alert(1)')?.number).toBe(7)
+  expect(az('ftp://host/r')?.number).toBe(7)
+  const created = parseCreatedPr('gh pr create --title T', 'https://github.com/a\u001b/b/pull/42')
+  expect(created?.number).toBe(42)
+  expect(created?.url).toBeUndefined()
+  const azCreated = parseCreatedPr('az repos pr create', JSON.stringify({ pullRequestId: 9, repository: { webUrl: 'javascript:x' } }))
+  expect(azCreated?.number).toBe(9)
+  expect(azCreated?.url).toBeUndefined()
+  const saved = parseSavedPrs([{ number: 3, title: 't', url: 'javascript:alert(1)' }, { number: 4, title: 't', url: 'https://example.org/pr/4' }])
+  expect(saved.map(p => p.url)).toEqual([undefined, 'https://example.org/pr/4'])
+})
+
+test('parseCreatedPr: the title is read only from the create command, not from the rest of a compound command', () => {
+  const out = 'https://github.com/example/orders/pull/42\n'
+  const title = (command: string) => parseCreatedPr(command, out)?.title
+  expect(title('echo --title "Wrong" && gh pr create --title "Right"')).toBe('Right')
+  expect(title('gh pr create --fill && git log -t nope --title other')).toBe('')
+  expect(title('gh pr create --fill; echo -t nope')).toBe('')
+  expect(title('gh pr create -t Short | tee log')).toBe('Short')
+  // an operator inside a quoted title does not end the command
+  expect(title('gh pr create --title "a && b" --draft')).toBe('a && b')
+  expect(title("gh pr create --title 'x; y' --body z")).toBe('x; y')
+  // a -t inside a quoted argument is text, not a flag
+  expect(title('gh pr create --body "fix -t nope" --title Right')).toBe('Right')
+  expect(title("gh pr create --body 'see -t nope' --fill")).toBe('')
+  expect(title('gh pr create --title="a -t b" --draft')).toBe('a -t b')
+  expect(title('gh pr create -t "a -d b"')).toBe('a -d b')
+})
+
+test('editedPathOf / recordEdited / repoRelative / parseEdited: the files an edit call writes, once each, made relative to the checkout', () => {
+  expect(editedPathOf({ tool: 'Edit', file_path: '/w/a.ts' })).toBe('/w/a.ts')
+  expect(editedPathOf({ tool: 'Write', file_path: ['', 'w', 'b.ts'].join(String.fromCharCode(92)) })).toBe('/w/b.ts')
+  expect(editedPathOf({ tool: 'MultiEdit', file_path: '/w/c.ts' })).toBe('/w/c.ts')
+  expect(editedPathOf({ tool: 'NotebookEdit', notebook_path: '/w/n.ipynb' })).toBe('/w/n.ipynb')
+  expect(editedPathOf({ tool: 'Read', file_path: '/w/a.ts' })).toBeUndefined()
+  expect(editedPathOf({ tool: 'Edit', file_path: '' })).toBeUndefined()
+  expect(recordEdited(recordEdited(undefined, '/w/a.ts'), '/w/a.ts')).toEqual(['/w/a.ts'])
+  expect(recordEdited(Array.from({ length: 200 }, (_, i) => `/f${i}`), '/new').at(-1)).toBe('/new')
+  expect(recordEdited(Array.from({ length: 200 }, (_, i) => `/f${i}`), '/new')).toHaveLength(200)
+  expect(repoRelative('/w/repo', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/w/repo/', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/W/Repo', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/w/repo', '/w/repo2/a.ts')).toBeUndefined()
+  expect(repoRelative(undefined, '/w/repo/a.ts')).toBeUndefined()
+  expect(parseEdited(['/a', 7, '', '/b'])).toEqual(['/a', '/b'])
+  expect(parseEdited('x')).toBeUndefined()
+  expect(parseEdited([])).toBeUndefined()
+})

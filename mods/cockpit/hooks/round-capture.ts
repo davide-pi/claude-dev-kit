@@ -1,0 +1,78 @@
+import type { CockpitLogEntry, CockpitSnapshot } from '../types'
+import { t } from './strings'
+
+/** The entries a round keeps of its waits and failed calls: the newest ten. */
+export const ROUND_LIST_KEEP = 10
+
+/** The prompt a round entry keeps: its first line, cut to this many characters. */
+export const PROMPT_KEEP = 120
+const FAIL_TEXT_KEEP = 200
+const FILES_KEEP = 100
+
+/** The label of a background task's completion message (`<task-notification>`): its kind and status, never its raw tags; none for any other text. */
+export function notificationLabel(text: string): string | undefined {
+  if (!text.trimStart().startsWith('<task-notification>')) return undefined
+  const status = /<status>\s*([^<\s]+)\s*<\/status>/.exec(text)?.[1]
+  // the summary names the kind; without it a workflow's task id (`wf_…`) does
+  const kind = /<summary>\s*(workflow|agent)/i.exec(text)?.[1]?.toLowerCase() ?? (/<task-id>\s*wf_/.test(text) ? 'workflow' : 'agent')
+  return t().notification(kind === 'workflow' ? 'workflow' : 'agent', status)
+}
+
+/** The title of the round a submit opens: a notification as its label, a slash command as `/name`, else the first non-empty line with its whitespace collapsed. */
+export function promptTitle(input: { text: string; command?: { name: string } }): string {
+  const label = notificationLabel(input.text)
+  if (label !== undefined) return label
+  if (input.command) return `/${input.command.name}`
+  const first = input.text.split(/\r?\n/).find(l => l.trim() !== '') ?? ''
+  return [...first.replace(/\s+/g, ' ').trim()].slice(0, PROMPT_KEEP).join('')
+}
+
+/** `s` with the open round's prompt set; a round that has one (a mid-turn message) keeps the first. */
+export const withRoundPrompt = (s: CockpitSnapshot, title: string): CockpitSnapshot => (s.roundPrompt !== undefined || title === '' ? s : { ...s, roundPrompt: title })
+
+/** `s` with a file the main loop edited added to the open round, once. */
+export const withRoundFile = (s: CockpitSnapshot, path: string): CockpitSnapshot =>
+  s.roundFiles?.includes(path) ? s : { ...s, roundFiles: [...(s.roundFiles ?? []), path].slice(0, FILES_KEEP) }
+
+/** `s` with one more failed main-loop call in the open round: the count, and the newest ten with their error text. */
+export const withRoundFail = (s: CockpitSnapshot, tool: string, text: string): CockpitSnapshot => ({
+  ...s,
+  roundFails: { n: (s.roundFails?.n ?? 0) + 1, list: [...(s.roundFails?.list ?? []), { tool, text: text.slice(0, FAIL_TEXT_KEEP) }].slice(-ROUND_LIST_KEEP) },
+})
+
+/** `s` with one more permission wait in the open round: the count, the total, and the newest ten. */
+export const withRoundWait = (s: CockpitSnapshot, tool: string, ms: number): CockpitSnapshot => ({
+  ...s,
+  roundWaits: { n: (s.roundWaits?.n ?? 0) + 1, ms: (s.roundWaits?.ms ?? 0) + ms, list: [...(s.roundWaits?.list ?? []), { tool, ms }].slice(-ROUND_LIST_KEEP) },
+})
+
+/** The number the round that ends now gets: after the last one counted, the log's own count for a session saved before the counter. */
+export const nextRoundNumber = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number => {
+  const rounds = (s.sessionLog ?? []).filter(e => e.kind === 'round')
+  return (s.roundSeq ?? Math.max(rounds.length, ...rounds.map(e => e.n ?? 0))) + 1
+}
+
+/** The number of the round open now (the last one counted plus one); none while the main loop is idle or has no state yet. */
+export const openRound = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined =>
+  s.claudeState === undefined || s.claudeState.kind === 'idle' ? undefined : nextRoundNumber(s)
+
+/** The last round concluded: the counter, else the last round the log holds (a session saved before the counter); none before any round. */
+export const lastRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number | undefined => {
+  const last = nextRoundNumber(s) - 1
+  return s.roundSeq ?? (last > 0 ? last : undefined)
+}
+
+/** The round an entry, an agent or a flow born or closed now is stamped with: the one open, else the last one concluded. */
+export const endRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined => openRound(s) ?? lastRoundOf(s)
+
+/** What the open round gives the entry that ends it. */
+export const roundFields = (s: CockpitSnapshot): Partial<CockpitLogEntry> => ({
+  ...(s.roundPrompt !== undefined && { prompt: s.roundPrompt }),
+  ...(s.roundAnchor !== undefined && { anchor: s.roundAnchor }),
+  ...(s.roundFiles !== undefined && { files: s.roundFiles }),
+  ...(s.ctx.percent !== undefined && { ctxPct: Math.round(s.ctx.percent) }),
+  ...(s.model !== undefined && { model: s.model }),
+  ...(s.effort !== undefined && { effort: s.effort }),
+  ...(s.roundWaits !== undefined && { waits: s.roundWaits }),
+  ...(s.roundFails !== undefined && { fails: s.roundFails }),
+})

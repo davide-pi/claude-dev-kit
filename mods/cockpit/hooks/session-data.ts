@@ -1,0 +1,273 @@
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface } from 'claude-code'
+
+import type { CockpitHistoryEntry, CockpitLogEntry, CockpitPr, CockpitSnapshot } from '../types'
+import { historyTokens, parseHistory, withHistoryAgents } from './agents'
+import { ROUNDS_KEEP, parseCounts, parseCtx } from './context'
+import { shownTurnUsd } from './shared'
+import { INITIAL } from './state'
+import { configDir } from './store'
+import { clearSwallowed, noteSwallowed, settleSwallowed, swallowedPending, withSwallowed } from './swallowed'
+import { parseFails, parseLogCount, parseToolCounts, parseWaits } from './timeline'
+import { agentCounts, taskCounts } from './view-agents'
+import { parseEdited, parseSavedPrs } from './work'
+
+// The scan that checks `$.state` references reads the atom from the file that uses it.
+const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
+
+// ── The statusline's state file ──
+// `<configDir>/.cache/cockpit-<sessionId>.json`: what the user's statusline reads to hide itself while the pane is open
+// and to show the last turn's cost and the agent counts. Same id rule as the statusline's context snapshot.
+
+const STATE_MIN_MS = 3000
+export const SESSION_ID = /^[\w-]{1,128}$/
+
+// Not an atom: the first render of a pane that waited undrawn must set it, and a render cannot write state.
+// The pane starts closed, `/cockpit` opens it, the person's close shuts it. A reload starts these over.
+export let isOpen = false
+let lastWritten = ''
+let lastDataWritten = ''
+let lastWriteAt = 0
+// When the write timer was scheduled: a timer the engine refuses never runs its callback, so the mark lapses by itself after twice the throttle.
+let writeScheduledAt: number | undefined
+
+/**
+ * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
+ * chat's pull requests, the context rounds, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
+ * exists. `history` is the one the file is written with (the session's end adds its running agents).
+ */
+export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
+  const { tokens, window, percent } = s.ctx
+  // the live window when the engine measured it, else the one the session was resumed with
+  const ctx = tokens !== undefined && window !== undefined && percent !== undefined ? { tokens, window, percent } : s.lastCtx
+  return {
+    history,
+    prs: s.prs ?? [],
+    ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
+    ...(s.edited !== undefined && { edited: s.edited }),
+    ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
+    ...(s.logTrimmed !== undefined && { logTrimmed: s.logTrimmed }),
+    ...(s.roundTools !== undefined && { roundTools: s.roundTools }),
+    ...(s.roundPrompt !== undefined && { roundPrompt: s.roundPrompt }),
+    ...(s.roundAnchor !== undefined && { roundAnchor: s.roundAnchor }),
+    ...(s.roundStartedAt !== undefined && { roundStartedAt: s.roundStartedAt }),
+    ...(s.roundFiles !== undefined && { roundFiles: s.roundFiles }),
+    ...(s.roundFails !== undefined && { roundFails: s.roundFails }),
+    ...(s.roundWaits !== undefined && { roundWaits: s.roundWaits }),
+    ...(s.roundSeq !== undefined && { roundSeq: s.roundSeq }),
+    ...(ctx && { ctx }),
+    ...(s.startedAt !== undefined && { startedAt: s.startedAt }),
+  }
+}
+
+/**
+ * Writes the state file (and the session data file) when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
+ * written when it ends. `isForced` skips the window (open, close, session start). `isHeartbeat` rewrites unchanged
+ * content with a fresh `at`: the statusline trusts `open:true` only while `at` is recent. A failure leaves the file as it was.
+ */
+export async function writeState($: EngineInterface, isForced = false, isHeartbeat = false): Promise<void> {
+  try {
+    const dir = await configDir($)
+    const id = await $.session.id()
+    if (!dir || !SESSION_ID.test(id)) return
+    const s = await read($, snapshot)
+    // The snapshot belongs to another session (or none yet): its history is not this id's to write.
+    if (s.sessionId !== id) return
+    const turnUsd = shownTurnUsd(s.cost)
+    const counts = taskCounts(s)
+    const content = {
+      open: isOpen,
+      lastTurnUsd: turnUsd !== undefined ? Math.round(turnUsd * 100) / 100 : null,
+      agents: agentCounts(s),
+      effort: typeof s.effort === 'string' ? s.effort : null,
+      tasks: counts ? { done: counts.done, total: counts.total } : null,
+      // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
+      mainTokens: s.mainTokens,
+      agentTokens: s.agentTokens,
+    }
+    const file = `${dir}/.cache/cockpit-${id}.json`
+    const key = `${file} ${JSON.stringify(content)}`
+    const dataFile = `${dir}/.cache/cockpit-data-${id}.json`
+    // the swallowed errors waiting are logged with this write; the snapshot takes them, and the count is forgotten, only once it succeeded
+    const swallowed = new Map(swallowedPending())
+    const now = await $.clock.now()
+    const data = JSON.stringify(sessionData(swallowed.size > 0 ? withSwallowed(s, swallowed, now) : s))
+    const dataKey = `${dataFile} ${data}`
+    const isStateStale = key !== lastWritten || isHeartbeat
+    const isDataStale = dataKey !== lastDataWritten
+    if (!isStateStale && !isDataStale) return
+    const wait = STATE_MIN_MS - (now - lastWriteAt)
+    if (!isForced && wait > 0) {
+      if (writeScheduledAt === undefined || now - writeScheduledAt >= 2 * STATE_MIN_MS) {
+        writeScheduledAt = now
+        $.clock.after(wait, () => {
+          writeScheduledAt = undefined
+          void writeState($).catch(() => undefined)
+        })
+      }
+      return
+    }
+    if (isStateStale) {
+      const { open, ...rest } = content
+      await $.fs.write(file, JSON.stringify({ open, at: now, ...rest }))
+      lastWritten = key
+    }
+    if (isDataStale) {
+      await $.fs.write(dataFile, data)
+      lastDataWritten = dataKey
+      if (swallowed.size > 0) {
+        await update($, snapshot, st => withSwallowed(st, swallowed, now))
+        settleSwallowed(swallowed)
+      }
+    }
+    lastWriteAt = now
+  } catch {
+    // best-effort: the statusline simply shows what it showed; the failure is counted and logged at the next write that succeeds
+    noteSwallowed('session-data:write')
+  }
+}
+
+/** What a saved file holds, as an object; undefined for a missing or unreadable file, or any other JSON. */
+async function readSaved($: EngineInterface, path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const text = await $.fs.read(path)
+    const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed)) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+type Saved = {
+  history: CockpitHistoryEntry[]
+  prs?: CockpitPr[]
+  mainTokens?: number
+  agentTokens?: number
+  ctxRounds?: number[]
+  edited?: string[]
+  sessionLog?: CockpitLogEntry[]
+  logTrimmed?: number
+  roundTools?: Record<string, number>
+  roundPrompt?: string
+  roundAnchor?: string
+  roundStartedAt?: number
+  roundFiles?: string[]
+  roundFails?: CockpitSnapshot['roundFails']
+  roundWaits?: CockpitSnapshot['roundWaits']
+  roundSeq?: number
+  ctx?: { tokens: number; window: number; percent: number }
+  startedAt?: number
+}
+
+/**
+ * What an earlier run of session `id` left: in its state file the tokens of the main loop and of the agents that left the list (a file from before
+ * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the context
+ * rounds and when the chat began. A state file from before the data file still holds the history and the pull requests: a field the data file does not
+ * have is read from there, once (the next write moves it).
+ */
+async function savedState($: EngineInterface, id: string): Promise<Saved> {
+  try {
+    const dir = await configDir($)
+    if (!dir || !SESSION_ID.test(id)) return { history: [] }
+    const state = await readSaved($, `${dir}/.cache/cockpit-${id}.json`)
+    const data = await readSaved($, `${dir}/.cache/cockpit-data-${id}.json`)
+    const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+    const field = (key: 'history' | 'prs') => (data && key in data ? data[key] : state?.[key])
+    const history = parseHistory(field('history'))
+    const prs = parseSavedPrs(field('prs'))
+    const parsedLog = parseLogCount(data?.sessionLog)
+    // a stored log longer than the keep adds its overflow to the count it was saved with
+    const logTrimmed = (count(data?.logTrimmed) ?? 0) + parsedLog.trimmed
+    return {
+      history,
+      prs: prs.length > 0 ? prs : undefined,
+      mainTokens: count(state?.mainTokens),
+      agentTokens: count(state?.agentTokens) ?? historyTokens(history),
+      ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
+      edited: parseEdited(data?.edited),
+      sessionLog: withHistoryAgents(parsedLog.log, history),
+      logTrimmed: logTrimmed > 0 ? logTrimmed : undefined,
+      roundTools: parseToolCounts(data?.roundTools),
+      roundPrompt: typeof data?.roundPrompt === 'string' && data.roundPrompt !== '' ? data.roundPrompt : undefined,
+      roundAnchor: typeof data?.roundAnchor === 'string' && data.roundAnchor !== '' ? data.roundAnchor : undefined,
+      roundStartedAt: typeof data?.roundStartedAt === 'number' && Number.isFinite(data.roundStartedAt) ? data.roundStartedAt : undefined,
+      roundFiles: Array.isArray(data?.roundFiles) && data.roundFiles.every(f => typeof f === 'string') && data.roundFiles.length > 0 ? data.roundFiles : undefined,
+      roundFails: parseFails(data?.roundFails),
+      roundWaits: parseWaits(data?.roundWaits),
+      roundSeq: count(data?.roundSeq),
+      ctx: parseCtx(data?.ctx),
+      startedAt: count(data?.startedAt),
+    }
+  } catch {
+    return { history: [] }
+  }
+}
+
+/** The snapshot between two sessions: its agents went to the ending session's history, the per-session readings start over, no session owns it. */
+export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
+  ...s,
+  sessionId: undefined,
+  agents: [],
+  history: [],
+  prs: undefined,
+  insights: undefined,
+  agentsOpen: undefined,
+  signalsAt: undefined,
+  openKeys: undefined,
+  deskTab: undefined,
+  groupsOpen: undefined,
+  tasks: [],
+  cacheShare: undefined,
+  mainTokens: undefined,
+  mainStepTokens: undefined,
+  agentTokens: undefined,
+  claudeState: undefined,
+  ctxRounds: undefined,
+  edited: undefined,
+  sessionLog: undefined,
+  logTrimmed: undefined,
+  roundTools: undefined,
+  roundPrompt: undefined,
+  roundAnchor: undefined,
+  roundStartedAt: undefined,
+  roundFiles: undefined,
+  roundFails: undefined,
+  roundWaits: undefined,
+  roundSeq: undefined,
+  // the window is the next session's own: nothing of this one's reading is left to pass for it
+  ctx: {},
+  // the last turn's cost and the one still to measure were this session's turns
+  cost: { ...s.cost, lastUsd: undefined, pendingUsd: undefined, isSettled: undefined },
+  lastCtx: undefined,
+  skillsUsed: undefined,
+  workflowRun: undefined,
+  events: undefined,
+  startedAt: undefined,
+})
+
+/**
+ * Makes the snapshot the session the engine answers now: the same id (a reload, an enable, a respawn) changes nothing;
+ * another loads that session's saved history. The id of the session that just ended is skipped (the engine
+ * answers it until it switches), unless `isStart`: a session start of that same id is a resume.
+ */
+export async function adoptSession($: EngineInterface, isStart = false): Promise<void> {
+  const id = await $.session.id()
+  const current = await read($, snapshot)
+  if (current.sessionId === id || (!isStart && current.endedSessionId === id)) return
+  const saved = await savedState($, id)
+  // A resume keeps the moment the chat began: the pull requests opened since then are the chat's.
+  const startedAt = saved.startedAt ?? (await $.clock.now())
+  // the errors counted so far belong to the session that is gone
+  clearSwallowed()
+  await update($, snapshot, s =>
+    s.sessionId === id
+      ? s
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, logTrimmed: saved.logTrimmed, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+  )
+}
+
+export async function setOpen($: EngineInterface, value: boolean): Promise<void> {
+  isOpen = value
+  await adoptSession($).catch(() => undefined)
+  await writeState($, true)
+}

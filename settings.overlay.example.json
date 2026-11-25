@@ -1,0 +1,16 @@
+{
+  "language": "Italian",
+  "model": "sonnet",
+  "effortLevel": "high",
+  "outputStyle": "my-output-style",
+  "alwaysThinkingEnabled": null,
+  "env": {
+    "CLAUDE_PERSONAL_REPOS": "owner/repo, owner/other-repo"
+  },
+  "permissions": {
+    "allow": [
+      "PowerShell(my-tool --version*)",
+      "Bash(my-tool --version*)"
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+# Plan file template
+
+Copy the skeleton, delete what does not apply, keep the field names. Phases exist only for plans
+past ~12 tasks; below that, a flat numbered list is clearer.
+
+The file itself is written in **English**, whatever language the conversation is in: a later session
+reads it back as a technical artifact, next to the code. Only the chat around it — the proposal, the
+sizing question, the confirmation — is in the chat language (`plan-work`).
+
+## Creating the file
+
+```powershell
+$plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --show-toplevel) 'docs/plans')
+$exclude = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'info/exclude'; New-Item -ItemType Directory -Force (Split-Path $exclude) | Out-Null
+if (@(Get-Content $exclude -EA Ignore) -notcontains '/docs/plans/') { Add-Content $exclude "`n/docs/plans/" }   # never committed
+$file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
+```
+
+## Skeleton
+
+```markdown
+# <Change name>
+
+Branch: `feature/<slug>` · Work item: `<id>` (or `none`) · Source: the request, quoted in one line (or
+the doc it comes from)
+
+## Goal
+
+One paragraph, max. What is true after this plan that is not true now — in terms of behaviour, not
+of code. If it cannot be stated without listing files, the goal is still a task list.
+
+## Not in scope
+
+Bullets. The things a reader would reasonably assume are included and are not. This section stops
+scope creep better than the goal does.
+
+## Open questions
+
+Anything undecided that blocks a task. Each one names the task it blocks and how it will be
+answered (probe, doc lookup, ask the user). Empty is a valid answer; `TBD` inside a task is not.
+A task that hangs on an open question is not written yet: one line under the question says what it
+will cover, and the task is written when the answer arrives.
+
+- Q1 — Does the importer need to stay idempotent across retries? Blocks task 4. Answer by reading
+  the existing retry policy in `src/Import/ImportHost.cs`.
+
+## Tasks
+
+### 1. <Imperative title>
+
+- files: `src/…/Foo.cs` (edit), `tests/…/FooTests.cs` (new)
+- change: <one sentence of observable behaviour>
+- criteria: Given <state>, when <action>, then <observable result> (one line each)
+- interface: `<signature>`  ← only when something else depends on it
+- verify: `<command>` → <what the output must show>
+- depends on: none
+- size: `L` for a broad or deep task (else omit) · risk: the task's axes (`security`, `data`, …), when it has any
+- optional: `mechanical` (rename, move, config, generated) · `tdd: false` with its reason, only when no test can observe the change
+
+Each task must be atomic (`SKILL.md` § 3).
+
+### 2. …
+
+## Verification
+
+The whole-change gate, run after the last task, not instead of the per-task ones. Point at
+`evidence-by-stack.md` for the change type and list the commands here so a resumed session does not rediscover
+them.
+
+## Decisions taken
+
+Appended while executing: the choice, the alternative rejected, the reason, in one line each. This
+is the section future-you actually reads.
+```
+
+## Worked example (bounded feature, 4 tasks)
+
+```markdown
+# Reject orders with no lines
+
+Branch: `feature/order-line-validation` · Work item: `12345` · Source: acceptance criteria on the item
+
+## Goal
+
+Placing an order with an empty line collection fails with a domain error instead of persisting a
+zero-total order that later breaks invoicing.
+
+## Not in scope
+
+- Line-level validation (quantity, price) — separate item.
+- The frontend error message; the API contract only gains a new error code.
+
+## Open questions
+
+None.
+
+## Tasks
+
+### 1. Add the domain rule
+
+- files: `src/Ordering/Domain/Order.cs` (edit), `tests/Ordering.Tests/OrderTests.cs` (edit)
+- change: `Order.Place` returns a failed result when `Lines` is empty, before any state mutation.
+- criteria: Given an order with no lines, when `Place` runs, then the result fails with `order.no_lines`
+  and the repository substitute receives no `Add`.
+- interface: `Task<Result<OrderId>> Place(PlaceOrder cmd, CancellationToken ct)` — unchanged shape,
+  new failure code `order.no_lines`.
+- verify: `dotnet test tests/Ordering.Tests --filter Place_NoLines_Rejects` → 1 passed, 0 failed
+- depends on: none
+
+### 2. Surface the failure code on the API
+
+- files: `src/Api/Controllers/OrdersController.cs` (edit), `tests/Api.IntegrationTests/OrdersTests.cs` (edit)
+- change: map `order.no_lines` to 422 with the code in the problem-details body.
+- criteria: Given a POST with no lines, when the controller handles it, then the response is 422 and
+  `extensions.code` is `order.no_lines`.
+- interface: response body stays `ProblemDetails`; `extensions.code = "order.no_lines"`.
+- verify: `dotnet test tests/Api.IntegrationTests --filter Post_OrderWithoutLines_Returns422`
+  → 1 passed
+- depends on: 1
+
+## Verification
+
+`evidence-by-stack.md`, backend row: build clean with warnings as errors, suite green, the new test named in
+the output, `git diff --stat` reviewed.
+
+## Decisions taken
+
+- Failure returned as a result, not an exception — matches the existing handler pipeline, which maps
+  results to problem details and would have to grow a catch block otherwise.
+```
+
+## Closing `/goal` line (multi-session plans)
+
+A plan that spans sessions ends with one ready line the owner can paste:
+
+```text
+/goal the verify command of every task exits 0, or stop after 20 turns
+```
+
+Never started by the assistant, never inside `deliver`.
+
+## Phased form (subsystem)
+
+Group tasks under `## Phase N — <name>` when the plan passes ~12 tasks. Each phase ends at a point
+where the system builds and its tests pass, so the work can stop there without leaving a broken
+tree. Number tasks continuously across phases (`1`…`17`), so `depends on` never needs a phase
+qualifier.
+
+A phase boundary is also the natural place to stop and rerun the evidence check (`evidence-by-stack.md`), and the natural cut line
+when the plan turns out to be two plans.

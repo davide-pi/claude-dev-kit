@@ -1,0 +1,108 @@
+import type { CockpitAlm, CockpitRateLimit, CockpitSnapshot } from '../types'
+import { isRecord } from './shared'
+import { t } from './strings'
+
+/** The margin after a busy interval: Claude counts as at work this long after its last main round. */
+export const WORKING_MARGIN_MS = 15 * 60_000
+
+/** Claude works now (any state but idle, entered within the margin: a `waiting` or `working` left over from a lost event is not work) or ended a main round within the margin: the CTX bar's glow flows. */
+export const isWorking = (s: CockpitSnapshot, now: number): boolean =>
+  (s.claudeState !== undefined && s.claudeState.kind !== 'idle' && (s.claudeState.since === undefined || now - s.claudeState.since <= WORKING_MARGIN_MS)) ||
+  (s.insights?.lastRoundEnd !== undefined && now - s.insights.lastRoundEnd <= WORKING_MARGIN_MS)
+
+/** How much should still be left now (`target`) and the signed gap to what is (`delta`, + is ahead). */
+export function weeklyPace(
+  remainingPct: number,
+  resetsAtMs: number | undefined,
+  windowSec: number,
+  now: number,
+): { target: number; delta: number } | undefined {
+  if (resetsAtMs === undefined) return undefined
+  const remainSec = (resetsAtMs - now) / 1000
+  if (remainSec <= 0 || remainSec > windowSec) return undefined
+  const target = Math.round((remainSec / windowSec) * 100)
+  return { target, delta: remainingPct - target }
+}
+
+// ── Rate limits ──────────────────────────────────────────────────────────────
+
+/**
+ * The status line's rate-limit cache (`.statusline-rate-limits.json`, `resets_at` in seconds) as the engine's limits, reconciled the way the
+ * status line does: a window whose reset is over is back to 0 % used with no reset time. A window of the wrong shape is left out.
+ */
+export function parseRateCache(value: unknown, now: number): CockpitRateLimit[] {
+  if (!isRecord(value)) return []
+  const window = (kind: 'five_hour' | 'seven_day'): CockpitRateLimit[] => {
+    const w = value[kind]
+    if (!isRecord(w) || typeof w.used_percentage !== 'number' || !Number.isFinite(w.used_percentage)) return []
+    const resetsMs = typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) && w.resets_at > 0 ? w.resets_at * 1000 : undefined
+    if (resetsMs !== undefined && resetsMs <= now) return [{ kind, percentUsed: 0 }]
+    return [{ kind, percentUsed: w.used_percentage, ...(resetsMs !== undefined && { resetsAt: new Date(resetsMs).toISOString() }) }]
+  }
+  return [...window('five_hour'), ...window('seven_day')]
+}
+
+/** A reset time as the engine reports it (ISO text) in milliseconds; undefined when absent or not a date. */
+export function parseReset(resetsAt: string | undefined): number | undefined {
+  const ms = resetsAt ? Date.parse(resetsAt) : Number.NaN
+  return Number.isNaN(ms) ? undefined : ms
+}
+
+// ── ALM target of the working directory ──────────────────────────────────────
+
+// A directory in the form the roots are compared in: forward slashes, no trailing one, lowercase.
+const normDir = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+/**
+ * The ALM target of `cwd` from the parsed `workspaces.json`, by the rules of hooks/lib/workspaces.js: the longest
+ * root whose path contains the directory, case-insensitively (a port: the mod cannot require a Node module). A root
+ * names its `project`, or maps the first subfolder through `projects`; `"ask"`, an unlisted subfolder and a GitHub
+ * root leave the project out. Undefined when there is no usable map: the hook is silent then, and so is the line.
+ */
+export function resolveAlm(map: unknown, cwd: string): CockpitAlm | undefined {
+  const rawRoots = isRecord(map) ? map.roots : undefined
+  if (!Array.isArray(rawRoots)) return undefined
+  const roots = rawRoots
+    .filter((r): r is Record<string, unknown> & { path: string } => isRecord(r) && typeof r.path === 'string')
+    .map(r => ({ entry: r, root: normDir(r.path) }))
+    .sort((a, b) => b.root.length - a.root.length)
+  const dir = normDir(cwd)
+  const hit = roots.find(({ root }) => dir === root || dir.startsWith(`${root}/`))
+  if (!hit) return { isMapped: false }
+  const { entry, root } = hit
+  const alm: CockpitAlm = { isMapped: true }
+  if (typeof entry.org === 'string') alm.org = entry.org
+  const project = projectOf(entry, dir.slice(root.length + 1).split('/')[0] ?? '')
+  if (project && entry.platform !== 'github') alm.project = project
+  if (typeof entry.identity === 'string' && /^[\w.-]+$/.test(entry.identity)) alm.identity = entry.identity
+  return alm
+}
+
+function projectOf(entry: Record<string, unknown>, firstSubfolder: string): string | undefined {
+  if (isRecord(entry.projects)) {
+    const key = Object.keys(entry.projects).find(k => k.toLowerCase() === firstSubfolder)
+    const name = key === undefined ? undefined : entry.projects[key]
+    return typeof name === 'string' ? name : undefined
+  }
+  return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
+}
+
+// ── Alerts (D4) and the session data file ──
+
+/** The context fill from which the cockpit alerts, and the 5h credits left (percent) at or under which it does. */
+const ALERT_CTX_PCT = 80
+const ALERT_CREDITS_LEFT_PCT = 10
+
+/** One cause the person is told about: `key` names the episode (it ends when the cause is no longer in the list), `text` is the toast. */
+export type CockpitAlert = { key: string; text: string }
+
+/** The causes of an alert in `s` now: context at 80 % or more, 5h credits at 10 % left or less, each failed subagent. */
+export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
+  const out: CockpitAlert[] = []
+  const pct = s.ctx.percent
+  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: t().alertContext(Math.round(pct)) })
+  const five = s.rateLimits.find(r => r.kind === 'five_hour')
+  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: t().alertCredits(Math.max(0, Math.round(100 - five.percentUsed))) })
+  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: t().alertSubagent(a.type) })
+  return out
+}

@@ -1,0 +1,81 @@
+name: validate
+
+# The kit is configuration: nothing compiles, so a broken front matter or a machine-specific
+# path only shows up when Claude Code silently stops loading an asset. This is the guardrail.
+# The mods/cockpit tests and the evals run locally only (they need the Claude Code runtime and
+# model access), so a green run here says nothing about them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate assets, references, leaks and docs
+        run: node tools/validate.mjs
+
+      # One test file at a time: several tests write fixtures to the temp directory and spawn
+      # shells, and a runner is small enough that the parallel speed-up is not worth a flaky run.
+      - name: Test the hooks
+        run: node --test --test-concurrency=1 tools/*.test.mjs
+
+      - name: Syntax-check the status line
+        run: |
+          for f in statusline.js statusline/*.js; do
+            node --check "$f"
+          done
+
+      - name: Syntax-check hooks and tools
+        run: |
+          for f in hooks/*.js hooks/lib/*.js tools/*.js tools/*.mjs scripts/*.mjs workflows/*.js; do
+            [ -e "$f" ] || continue
+            node --check "$f"
+          done
+
+      - name: Parse every PowerShell script
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Recurse -Filter *.ps1) {
+              $parseErrors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $file.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+              foreach ($e in $parseErrors) {
+                  $failed = $true
+                  $rel = [System.IO.Path]::GetRelativePath($PWD, $file.FullName)
+                  Write-Host "::error file=$rel,line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+          }
+          if ($failed) { exit 1 }
+          Write-Host "all PowerShell scripts parse"
+
+  # The installer, the hooks and the tools are Windows-first: the same checks on the platform they target.
+  # .gitattributes keeps text files LF in the checkout, so the byte-equal checks hold there too.
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate assets, references, leaks and docs
+        run: node tools/validate.mjs
+
+      - name: Test the hooks and tools
+        run: node --test --test-concurrency=1 tools/*.test.mjs

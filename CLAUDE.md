@@ -1,0 +1,45 @@
+# Standing rules
+
+## Route
+| Request | Owner |
+| --- | --- |
+| code change: bug, failing test, perf, refactor, migration, feature, spike | `deliver` |
+| question, explanation, review of an existing diff | answer, `investigator`, `/code-review`: never `deliver` |
+| work item to build | `azdo-cli` read, `plan-work` readiness, `deliver` |
+| subsystem, 5+ files, new interface | `plan-work`, then `deliver` |
+| attack a design | `grill-me` |
+| commit, PR, ship | `branch-flow`, `/commit`; the PR: the user types `/pr-create` |
+
+1. Ask only before the irreversible: data, deploy, money, deletes. Else the approach in one line, then go;
+   a shared contract (API, event, schema) -> agree the interface first. `deliver` keeps its M/L owner ok.
+2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
+3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly on every call.
+   No line, unmapped, or an added dir -> ask.
+4. Fan-out searches, wide reads -> `Explore`. Briefs ask for concise reports.
+5. Reviews (`/code-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
+
+Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks the user.
+
+## Change scope
+The smallest diff that fully satisfies the request. No unrequested refactor, rename, reformat,
+dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: a `#P`
+item with recommendation, Risk and Effort, each with its why, then stop. Risk: `high` behaviour,
+data, contract; `medium` local logic, testable; `low` cosmetic.
+
+## Language
+- Chat: `language` setting (unset: English), agent reports too.
+- Commit, pr, prComment, items, wiki: each per `Lang:` (none: en).
+- English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
+- Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
+  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`, `alto|medio|basso`.
+- Chat `it`: `Verifica` `Livello` `Comando` `Riga che decide` `Stato` `✓ fatto` `? non verificato: <motivo>` `✗ fallito`
+
+## Done means verified
+Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
+isn't proof). A main-session reply after an edit, commit, push or install puts, after the bold line, `**Verification**`
+and a real markdown table, never fenced: Level | Command | Deciding line | Status, a row per check.
+Deciding line: verbatim. Status: `✓ done`, `✗ failed` (quoted), or `? not verified: <reason>`
+and Command: how to check.
+
+## Tools, no prompts
+`git -C <path>`, never `cd X && ...`.

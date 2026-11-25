@@ -1,0 +1,52 @@
+import type { Elements, RenderElement, RenderSurface } from 'claude-code'
+
+import type { AnimKind, BeatSpeed } from './anim'
+import { spanWidth } from './shared'
+import type { Span } from './shared'
+
+/** The elements the views draw with; every surface's table has them. */
+export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'> & {
+  /** Every surface but the mobile app's draws a text field: there the note is left out. */
+  Input?: Elements['terminal']['Input']
+  /** The terminal's and the desktop's: the CTX bar's glow runs in one; elsewhere the bar is drawn still. */
+  Client?: Elements['terminal']['Client']
+}
+
+/** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
+const BUTTON_CHROME = 4
+export const BUTTON_GAP = 1
+
+// ── Spans ────────────────────────────────────────────────────────────────────
+
+export const dim = (t: string): Span => ({ t, dim: true })
+export const sp = (t: string, c?: string, bold?: boolean): Span => ({ t, c, bold })
+
+/** One `Text` per span: the children of a row and of a pressable row. */
+export function spanNodes({ Text }: Ui, spans: readonly Span[]): RenderElement[] {
+  return spans.map(s => (
+    <Text color={s.c} backgroundColor={s.bg} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
+      {s.t}
+    </Text>
+  ))
+}
+
+export function line(ui: Ui, spans: readonly Span[]): RenderElement {
+  const { Text } = ui
+  return <Text wrap="truncate">{spanNodes(ui, spans)}</Text>
+}
+
+/** `cells` as an animated cell of `kind` where the surface has surface modules, else drawn still. A Client cannot sit inside a Button: its cells go beside it. */
+export function animCell(ui: Ui, key: string, kind: AnimKind, cells: readonly Span[], token?: string, speed?: BeatSpeed): RenderElement {
+  if (!ui.Client) return line(ui, cells)
+  // props cross to the surface as plain data: a span's unset fields are left out, not undefined
+  const plain = cells.map(s => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as Span)
+  return <ui.Client key={key} module="./anim.tsx" props={{ kind, cells: plain, ...(token === undefined ? {} : { token }), ...(speed === undefined ? {} : { speed }) }} width={spanWidth(cells)} />
+}
+
+/** Cells a row of terminal Buttons takes with these labels. */
+export const buttonRowWidth = (labels: readonly string[]): number =>
+  labels.reduce((n, l) => n + [...l].length + BUTTON_CHROME, 0) + BUTTON_GAP * Math.max(0, labels.length - 1)
+
+export const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
+export const padStart = (s: string, n: number) => ' '.repeat(Math.max(0, n - [...s].length)) + s
+

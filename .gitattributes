@@ -1,0 +1,19 @@
+# Normalize everything to LF in the repository, and keep it LF in the working tree:
+# these files are read by Claude Code and by Node, both of which are agnostic, and a
+# CRLF working tree turned every edit into a whole-file diff.
+* text=auto eol=lf
+
+# PowerShell / cmd keep CRLF locally — some Windows hosts still care.
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Never touched.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.gz  binary
+*.zip binary

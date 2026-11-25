@@ -1,0 +1,25 @@
+# Machine-local Claude Code state — never commit (paths, session content, credentials)
+.claude/settings.local.json
+.claude/**/*.local.json
+.claude/agent-memory/
+.remember/
+# plan-work's plan files: working notes between sessions, never committed (docs/delivery.md).
+/docs/plans/
+# `claude plugin eval` writes run results here unless --output-dir says otherwise.
+/evals/results/
+
+# .NET build output (eval fixtures)
+**/bin/
+**/obj/
+
+# Backups / editor / OS noise
+*.bak
+*.bkp
+*.bak.*
+*~
+Thumbs.db
+.DS_Store
+/settings.overlay.json
+
+# Engine-generated declarations and the check's scratch dir inside a mod
+/mods/*/.claude-plugin/types/

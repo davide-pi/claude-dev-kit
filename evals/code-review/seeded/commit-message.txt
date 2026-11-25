@@ -1,0 +1,8 @@
+Aggiunge export CSV, ricerca per stato e sconto premium
+
+Criteri di accettazione:
+1. Un cliente autenticato scarica il CSV dei PROPRI ordini (GET api/export/{customerId}); nessun accesso agli ordini di altri clienti.
+2. Gli ordini in stato Cancelled sono esclusi dall'export.
+3. POST api/orders/{id}/discount applica il 10% di sconto sul totale, solo ai clienti premium; per i non premium il totale resta invariato.
+4. GET api/orders/search?status=... filtra gli ordini del cliente corrente per stato.
+

@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|PowerShell", "hooks": [{ "type": "command", "command": "node", "args": ["$env:CLAUDE_HOOKS/guard.js"] }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node", "args": ["$env:CLAUDE_HOOKS/guard.js"] }] }
+    ]
+  }
+}

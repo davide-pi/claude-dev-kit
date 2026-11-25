@@ -1,0 +1,349 @@
+// State contract of the cockpit mod: everything a drawing reads lives in one value,
+// so a hot reload loses nothing and every write redraws the readers.
+
+export type CockpitRateLimit = { kind: string; percentUsed: number; resetsAt?: string }
+
+/** The four token counters the API reports for a response, kept as the agent's running totals. */
+export type CockpitUsage = { input: number; output: number; cacheRead: number; cacheWrite: number }
+
+export type CockpitAgent = {
+  id: string
+  parentId?: string
+  /** `subagentType` of the spawn. */
+  type: string
+  /** The `model` the Agent call asked for, as given (an alias or an id). */
+  requested?: string
+  /** What the agent runs on: the resolved id from the spawn, then the latest `turn.step`'s. */
+  model?: string
+  effort?: string | number
+  /** The spawn's `description` of the task (a few words); absent for an agent only seen through its events. */
+  description?: string
+  /** The last tool the agent called, from the `tool.call` events carrying its id; absent before its first call. */
+  lastTool?: string
+  /** The tools the agent has in flight (a `tool.call` seen before its `next` answered), in start order; the last one is the tool running now. */
+  activeTools?: string[]
+  status: 'running' | 'done'
+  startedAt: number
+  endedAt?: number
+  /** True when the agent ended on an error, an interruption or a refusal, or the engine lists it failed or killed. */
+  isFailed?: boolean
+  /** True when the session ended with the agent still running: the history's third outcome, `interrupted`. */
+  isInterrupted?: boolean
+  /** New tokens the agent's turns used: input + cache writes + output (cache reads left out). */
+  tokens: number
+  /** The four counters of the agent's turns, live: each step adds its own, the turn's end replaces them with the turn's total. Absent before any usage was seen. */
+  usage?: CockpitUsage
+  /** The part of `usage` that the steps of the turn in progress added; the turn's end swaps it for the turn's own total. */
+  stepUsage?: CockpitUsage
+  /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
+  runId?: string
+  /** The conversation round open when the agent spawned; absent when none was (kept across a resume). */
+  round?: number
+  /** The agent's last tool calls (8 at most, oldest first), in memory only: never written to the session data. */
+  trail?: CockpitTrailEntry[]
+}
+
+/** One tool call of an agent's trail: a short label from the call's own arguments, never a raw command or a full path. */
+export type CockpitTrailEntry = {
+  tool: string
+  label?: string
+  at: number
+  /** True once the call returned. */
+  isDone?: boolean
+  /** True when the call ended on an error or a refusal. */
+  isFailed?: boolean
+}
+
+/** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */
+export type CockpitHistoryEntry = {
+  id: string
+  type: string
+  model?: string
+  startedAt: number
+  endedAt: number
+  tokens: number
+  isFailed: boolean
+  effort?: string | number
+  /** The spawn's `description` of the task, kept so an expanded history row still says what the agent did; absent when it had none. */
+  description?: string
+  /** What the agent cost, kept so a history row still shows it after the session is resumed (the events do not outlive it); absent when its usage was not read. */
+  usd?: number
+  /** Present (true) only for an agent still running when its session ended. */
+  isInterrupted?: boolean
+  /** The workflow run the agent belonged to, kept so a reload still groups it under its flow. */
+  runId?: string
+  /** The conversation round the agent was spawned in; absent for an agent spawned with no round open (or saved before rounds were recorded). */
+  round?: number
+}
+
+export type CockpitGit = {
+  branch: string
+  /** HEAD points at a commit, not a branch: `branch` then reads `HEAD`. */
+  isDetached?: boolean
+  staged: number
+  modified: number
+  untracked: number
+  /** Root of the linked worktree the session runs in; absent in a main checkout. */
+  worktreeRoot?: string
+  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the git reads run and the paths they list start. */
+  root?: string
+  /** The branch's upstream (`origin/feature/x`) and the commits ahead of it and behind it; absent without an upstream. */
+  upstream?: string
+  ahead?: number
+  behind?: number
+}
+
+/** A pull request of this chat, as a link: seen for the branch checked out (`gh pr view`, `az repos pr list`) or created in the session. `url` is absent when the CLI named no web address. */
+export type CockpitPr = {
+  number: number
+  title: string
+  url?: string
+  /** Where the pull request stands, as the last reading said; absent (a pull request only seen created) counts as open. */
+  state?: 'open' | 'draft' | 'merged' | 'closed'
+}
+
+export type CockpitTask = {
+  /** The task tool's `task.id`, or `todo:<content>` for a TodoWrite item. */
+  id: string
+  subject: string
+  status: 'pending' | 'in_progress' | 'completed'
+  /** `$.clock.now()` when it went in progress; absent otherwise. */
+  startedAt?: number
+}
+
+/**
+ * The workflow run in flight, as far as the engine lets the mod see it: its name (the `Workflow` tool's result), the agents it spawned
+ * and which of them finished, the label of the newest one (`phase`: the engine exposes no phase) and the round its `R<n>` names, and when
+ * any of its agents last did something. `endedAt` is set when a main turn starts or a clock tick finds every agent done (a silent run's agents are taken as done); a later spawn reopens the run.
+ */
+export type CockpitPlanTask = { id: string; title: string; dependsOn: string[] }
+
+export type CockpitWorkflowRun = {
+  runId: string
+  name?: string
+  /** `label` is the agent's spawn description (`implement T1` for a build task agent). */
+  agents: { id: string; isDone: boolean; label?: string; isFailed?: boolean }[]
+  /** The task plan the `Workflow` call passed (`args.tasks`), in plan order; absent for a workflow without one. */
+  tasks?: CockpitPlanTask[]
+  phase?: string
+  /** The workflow's own review round (not the conversation's). */
+  round?: number
+  /** The conversation round open where the run was first seen; absent when none was. */
+  startRound?: number
+  /** The lane the run's flow takes among flows that overlap in rounds (0 the first). */
+  lane?: number
+  lastAt?: number
+  endedAt?: number
+  /** Set when the silence check closed the run: it is logged only once a newer run replaces it, as failed. */
+  isSilent?: boolean
+}
+
+/** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
+export type CockpitDoneClaim = { at: string; session?: string; rule: string; excerpt: string }
+
+/** The ALM target the cwd resolves to in `workspaces.json`; absent from the snapshot when there is no usable map. */
+export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; identity?: string }
+
+/**
+ * What Claude is doing now, derived from the events the mod hears (the engine has no state of its own): a main turn
+ * starting or a text chunk is `working`, a thinking chunk `thinking`, a main-loop tool call in flight `tool` (its name),
+ * a tool call the person has to approve (`tool.check` asks) `waiting` until that call ends, the main turn's end `idle`.
+ */
+export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string; /** `$.clock.now()` when the wait for the person began (`waiting` only). */ since?: number }
+
+/** What an entry of the event ring buffer is about: a finished agent (its cost counts in the spend split). */
+export type CockpitEventKind = 'agent'
+
+/** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
+export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
+
+/** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request, a finished agent, a notification that first held. */
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal' | 'flow' | 'error'
+
+/**
+ * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`, `tools` the main loop's tool calls of the round by tool name; `commit`: `text` and `key` are the short hash;
+ * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title;
+ * `agent` (`at` is its end): `key` the agent id, `text` its type, `model`, `effort`, `usd`, `ms` its length, `isFailed`; `signal`: `key` the `kind:key` id of the notification, `text` its label, `n` its number, `severity`.
+ * `flow` (`at` is the run's end): `key` the run id, `text` the script name, `usd` the sum of its agents, `ms` first agent start to end, `n` the highest loop round, `isFailed` when it ended silent (not observed closing);
+ * `agent` also carries `runId` when it belongs to a workflow run.
+ * `key` makes an entry once-only (per kind); a `flow` entry is replaced instead, so a resumed run is one node.
+ */
+export type CockpitLogEntry = {
+  at: number
+  kind: CockpitLogKind
+  key?: string
+  /** The conversation round the entry was logged in (a flow: where it started); absent when none was open. */
+  round?: number
+  /** A flow only: the conversation round open when its node was written. */
+  endRound?: number
+  /** A flow only: its lane among flows that overlap in rounds. */
+  lane?: number
+  runId?: string
+  text?: string
+  /** An agent's spawn description (its label, which names its loop round under a flow). */
+  desc?: string
+  usd?: number
+  ms?: number
+  tokens?: number
+  after?: number
+  isFailed?: boolean
+  model?: string
+  effort?: string | number
+  n?: number
+  severity?: 'block' | 'warn' | 'info'
+  tools?: Record<string, number>
+  /** `round`: the person's first prompt line (whitespace collapsed, at most 120 chars; a slash command `/name`). */
+  prompt?: string
+  /** `round`: the files the main loop edited. */
+  files?: string[]
+  /** `round`: the context percent at its end. */
+  ctxPct?: number
+  /** `round`: the chat marker the round's link scrolls to. */
+  anchor?: string
+  /** `round`: the permission waits (count, total ms, the newest ten). */
+  waits?: { n: number; ms: number; list?: { tool: string; ms: number }[] }
+  /** `round`: the main loop's failed tool calls (count, the newest ten with their error text). */
+  fails?: { n: number; list?: { tool: string; text: string }[] }
+  /** `commit`, `test`, `pr`: the id of the flow agent that made it; none for the main loop. `runId` then names its flow. */
+  agent?: string
+}
+
+/**
+ * What TREND adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
+ * for it); per session, not persisted.
+ */
+export type CockpitInsights = {
+  /** Main turns that ended. */
+  rounds: number
+  /** Their cost in USD where the engine measured it, and the dearest one with its length. */
+  usd: number
+  costliest?: { usd: number; ms: number }
+  /** Compactions the session went through, manual or automatic. */
+  compactions: number
+  /** Wall-clock milliseconds: the rounds', the main loop's tool calls', and the permission requests' wait for the person. */
+  roundMs: number
+  toolMs: number
+  waitMs: number
+  /** Calls and failures (an error, a refusal or a throw) by tool name. */
+  tools: Record<string, { calls: number; failed: number }>
+  /** Successful reads by file path. */
+  reads: Record<string, number>
+  /** The cache hit of the last twenty main turns, oldest first. */
+  cacheShares: number[]
+  /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument, the whole one when it differs (a file's full path, a long command) and the result's estimated tokens (characters / 4). */
+  biggest?: { tool: string; arg?: string; fullArg?: string; tokens: number }[]
+  /** The estimated tokens (characters / 4) the main loop's results added to the context by tool, since the last compaction. */
+  byTool?: Record<string, number>
+  /** How many times each Bash command failed (its short argument). */
+  failedCmds?: Record<string, number>
+  /** When the last main round ended (`$.clock.now()`). */
+  lastRoundEnd?: number
+  /** The last round that began after an idle gap over the signals' limit: its number, its cache hit and the gap. */
+  idleCold?: { round: number; share: number; gapMs: number }
+  /** The last main-loop call that failed: the tool and its error message on one line. */
+  lastError?: { tool: string; text: string }
+  /** The context before and after each of the last three compactions, oldest first; `after` is the first reading that followed (absent until one did). */
+  compactCtx?: { before: number; after?: number }[]
+}
+
+export type CockpitSnapshot = {
+  /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
+  sessionId?: string
+  /** The id of the session that ended last: while the engine still answers it, no change takes it back (it answers it until the switch to the next id). */
+  endedSessionId?: string
+  cwd: string
+  /** Raw model id or name of the main loop. */
+  model?: string
+  effort?: string | number
+  /** True when CLAUDE_CODE_SUBAGENT_MODEL forces the subagents' model. */
+  isSubagentModelForced: boolean
+  /** Context window of the main loop. */
+  ctx: { tokens?: number; window?: number; percent?: number }
+  /** Session cost in USD; `startUsd` is the total when the last turn began, `lastUsd` the cost of the last main turn that ended,
+   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet, `isSettled` that a measure settled the last
+   * turn since (so `lastUsd` is final and the spend after it is not the turn's). */
+  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number; isSettled?: boolean }
+  rateLimits: CockpitRateLimit[]
+  /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
+  cacheShare?: number
+  /** New tokens the main loop used this session (same count as an agent's `tokens`), live like an agent's `usage`; absent before any usage was seen. With the agents' it is the session's tokens. */
+  mainTokens?: number
+  /** The part of `mainTokens` that the steps of the turn in progress added. */
+  mainStepTokens?: number
+  /** New tokens of every agent that left the live list this session: the share's counterpart of `mainTokens`, kept with it in the state file (the history is cut and cannot be summed). Absent until one left. */
+  agentTokens?: number
+  /** The main loop's state for the header's icon; absent before any event (read as idle). */
+  claudeState?: CockpitClaudeState
+  /** The context size at the end of each of the last twenty main turns, newest last: the context trend. A shrinking context stays in it (a compaction shows as a drop). */
+  ctxRounds?: number[]
+  /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: they tell which checkout is the chat's. Kept in the session data file. */
+  edited?: string[]
+  /** The top level of the checkout the process's first git read found ('' when it started outside any repo), kept across a /clear or a resume: the PR of its branch is the chat's without an edit. */
+  homeRoot?: string
+  /** The context of the session's last state (its data file), drawn with a `~` until the engine measures the live window; never an alert's input. */
+  lastCtx?: { tokens: number; window: number; percent: number }
+  /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
+  lastRates?: CockpitRateLimit[]
+  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
+  skillsUsed?: string[]
+  /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
+  autoCompactAt?: number
+  alm?: CockpitAlm
+  agents: CockpitAgent[]
+  /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
+  history?: CockpitHistoryEntry[]
+  /** When each notification in force first held (`kind:key` → ms): the time on its row. One that stops holding is dropped. */
+  signalsAt?: Record<string, number>
+  git?: CockpitGit
+  /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
+  tasks?: CockpitTask[]
+  /** The workflow run whose agents the mod saw spawn; cleared by a stop that reports no workflow in flight. */
+  workflowRun?: CockpitWorkflowRun
+  /** The last blocks of `done-claim.log` (this session's), newest first; the done-claim notification counts this session's. Absent without a readable log. */
+  doneClaims?: CockpitDoneClaim[]
+  /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
+  prs?: CockpitPr[]
+  /** The ring buffer of finished rounds and agents, oldest first. */
+  events?: CockpitEvent[]
+  /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests, finished agents, notifications), oldest first, at most 300; kept in the session data file. Not `history`, the agent history. */
+  sessionLog?: CockpitLogEntry[]
+  /** How many entries the session log's keep has dropped; kept in the session data file. Absent when none. */
+  logTrimmed?: number
+  /** The main loop's tool calls since the last round ended, by tool name: the next round entry takes them. Kept in the session data file. */
+  roundTools?: Record<string, number>
+  /** The open round's first prompt line, the files the main loop edited, its failed calls and its permission waits: the next round entry takes them. Kept in the session data file. */
+  roundPrompt?: string
+  /** The chat marker placed when the open round began (a `$.ui.place` request id): the next round entry takes it as its `anchor`. */
+  roundAnchor?: string
+  /** When the open round's turn began (ms): the request's start on the desktop page. Cleared when the turn completes. Kept in the session data file. */
+  roundStartedAt?: number
+  roundFiles?: string[]
+  roundFails?: { n: number; list?: { tool: string; text: string }[] }
+  roundWaits?: { n: number; ms: number; list?: { tool: string; ms: number }[] }
+  /** The number of the last round that ended: the next round entry is this plus one. Kept in the session data file. */
+  roundSeq?: number
+  /** `$.clock.now()` of the session's first reading: a branch's pull request joins the chat only when opened after it. */
+  startedAt?: number
+  /** What TREND shows; absent before the first round or tool call. */
+  insights?: CockpitInsights
+  /** The agents expanded in IN PROGRESS (the others show their one line): description, facts, warning, four token counters, tool. */
+  agentsOpen?: string[]
+  /** The lists shown in full and the rows expanded: `attention`, `inProgress`, `done`. */
+  openKeys?: string[]
+  /** The desktop page's open tab; absent: `now`. Not kept in any file. */
+  deskTab?: 'now' | 'log'
+  /** The state a person gave to a group of FATTO, by its key: it holds when the group stops being the newest. Absent: the newest is open, the others closed. */
+  groupsOpen?: Record<string, boolean>
+  /** True once the pane's language was read (a session start or the first drawing); not kept in any file. */
+  isLangRead?: boolean
+  /** The repo's default branch, as `origin/HEAD` names it: no pull request is looked for on it. Absent when `origin/HEAD` is not set. */
+  defaultBranch?: string
+  /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */
+  now: number
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    cockpit: { snapshot: CockpitSnapshot }
+  }
+}

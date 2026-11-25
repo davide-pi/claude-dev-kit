@@ -1,0 +1,399 @@
+# claude-dev-kit
+
+A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit for a developer who
+has to cover every role alone: analyst, backend, DBA, frontend, reviewer, release manager, ops.
+
+Opinionated about **C# / ASP.NET, EF Core, SQL Server, PostgreSQL, Redis, RabbitMQ, TypeScript,
+Angular, React**, with **Azure DevOps** as the ALM platform and GitHub alongside it. Opinionated on
+*technique*, anonymous on *identity*: the patterns, libraries and commands are real, while
+organization and project names, machine paths and addresses are placeholders.
+
+**Every language a person reads is configurable per aspect, English by default; English for the code and for what the AI reads back.** The chat (reports, questions, agent reports) follows the native `language` setting; commit messages, pull request titles and bodies, PR comments, work items and wiki pages each follow their key in the `lang` block of `workspaces.json` (global, overridden per root), printed as the `Lang:` session line. English is reserved for the code, for a project's technical documentation tree, for plan files and specs (a later session reads those back, which makes them AI-facing reference), and for the instructional prose of the assets in this repository. So an asset is written in English and *says* "in the chat language", "in the pr language": to change a language, change the configuration, not the assets. The kit's fixed labels (report and table headers, `Release:`-style markers, states like `done`) are written in English and emitted in the target language through the fixed equivalents the asset names (`pr-create`); the verdict and proposal tables keep the forms `CLAUDE.md` § Language lists. Machine identifiers are never translated in either direction.
+
+**How it works, in diagrams:** [docs/how-it-works.md](docs/how-it-works.md).
+
+## Five levels
+
+| Level | What it solves | Assets |
+|---|---|---|
+| **Routing** | which asset owns this task | the route table in `CLAUDE.md`, path-scoped `rules/` |
+| **Knowledge** | not re-deciding what was decided once | 21 skills (stack and pipeline conventions live in `rules/`), depth in reference files loaded on demand |
+| **Exploration** | finding context without burning the main context window | 9 subagents |
+| **Execution** | running a known sequence in one shot | 6 one-shot skills (`/name`), 2 saved workflows |
+| **Safety net** | not forgetting, and not doing the irreversible | 12 hook files, the completion gate, the validator |
+
+Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
+**route through the table**, and **try the CLI before the MCP server, every time**.
+
+## Skills
+
+One skeleton throughout — *When* (with what it explicitly excludes), *Decide* (a decision table or
+tree), *Do* (copy-pasteable PowerShell), *Traps*, *References* — a `**Contract.**` line after the title
+(what it produces · what it never does · the output language), the description a `Use when` trigger of
+35 words at most, the file capped at 120 lines, with depth in `references/` files loaded only on demand. No skill pins a version: where the answer depends on one,
+the skill says which file to read or where to verify it.
+
+**Routing and process.** These absorb the parts of the `superpowers` plugin worth keeping, without
+the ceremony and rewritten for PowerShell.
+
+| Skill | Purpose |
+|---|---|
+| `skills/plan-work/SKILL.md` | A plan file with verifiable tasks, sized to the change — and when not to write one at all. Also turns a work item into an attack plan before any code. |
+| `skills/deliver/SKILL.md` | Every code change from triage to verdict: scenario, size and risk axes, every closed question asked once up front in one round, at M and L a plan and one owner ok, then the `build` workflow (size S and docs only: the session edits inline with one reviewer), tests by level (real tests only after asking, with the exact command), and a verdict block with a table of what was left outside. References for the scenarios and for perf baselines. |
+| `skills/kowalski/SKILL.md` | The analysis entry point, called by name ("kowalski"): reads, asks every question once, plans atomic tasks the owner approves; never edits code. |
+| `skills/skipper/SKILL.md` | The coordination entry point ("skipper"): runs a request or kowalski's approved plan through `deliver` and reports the verdict, the `stop` questions and the open findings. |
+| `skills/rico/SKILL.md` | The bug entry point ("rico"): reproduces, proves the root cause, then fixes with the repro test as proof. |
+| `skills/soldato/SKILL.md` | The test entry point ("soldato"): runs the change's unit and integration tests, offers real tests and runs them only on a yes. |
+| `skills/debug-systematic/SKILL.md` | Reproduce, isolate, explain, then hand the proven cause to `deliver` — with a symptom-to-instrument table for .NET processes, query plans, brokers, pipelines and intermittent failures. |
+| `skills/finding-format/SKILL.md` | The one finding shape (category, priority, verdict, anchor) that the reviewer agents and `/code-review` share. |
+| `skills/skill-forge/SKILL.md` | How to add or change an asset of this kit: shape decision, front matter, caps, splitting, finish checklist. |
+
+**Backend .NET**
+
+| Skill | Purpose |
+|---|---|
+| `skills/dotnet-testing/SKILL.md` | Adding tests where there are none: the RPC handler as the seam, the first test project and its pipeline step, what deserves a test, xUnit mechanics. |
+
+**Delivery and ALM.** CLI-first on both platforms; the MCP servers are a documented fallback for the
+few capabilities the CLI genuinely lacks.
+
+| Skill | Purpose |
+|---|---|
+| `skills/azdo-cli/SKILL.md` | The foundation everything else calls: configuration and defaults, auth including an organization on another tenant, WIQL, the boards, reading one work item in full or listing your active ones, repos, PR and pipeline verbs, resolving the identity to assign to **against the organization** rather than the machine, `az devops invoke` as the REST escape hatch, and the fallback rules. |
+| `skills/user-story-standard/SKILL.md` | The company standard for **what an item says**: classifying a request as a User Story, Bug, Impediment or TECH, the exact body shape of each, and acceptance criteria in the mandatory `Dato che / Quando / Allora` form — plus the four coverage families behind them, and the rule that the criteria are never written together with the story, because what looks like one story usually contains three. |
+| `skills/pr-create/SKILL.md` | Opening a PR on either platform: imperative title in the pr language, reviewer-sized body with a `Release:` block naming every component the change forces a deploy of, protected-branch target read from the remote, the parent backlog item linked (never a Task). |
+| `skills/branch-flow/SKILL.md` | Branch conventions on both platforms, isolated Claude workspaces, and the finish menu once the work is complete — always squash and delete the source branch. |
+
+## One-shot skills and workflows
+
+The one-shot layer: the decision is already made, the skill runs the sequence. These were slash
+commands; commands are now skills, so each is a `skills/<name>/SKILL.md` typed as `/name` and a
+`commands/` folder must not exist (the validator fails on it, and a stale live copy would shadow
+the skill — `install.ps1` offers to remove it). Each declares what it never does in its contract
+line, and none of them merges, deploys, force-pushes or drops. The noisy ones run **forked** in a
+subagent, so the raw output never reaches the main conversation.
+
+| Skill | Does |
+|---|---|
+| `skills/db/SKILL.md` | `/db`, forked into `db-analyst` — inspect the project's database: discover the engine and connection, run a query or describe a schema. Read-only by default. |
+| `skills/logs/SKILL.md` | `/logs`, forked into `ops-analyst` — tail and filter the current service's logs, whichever way this project produces them. |
+| `skills/code-review/SKILL.md` | `/code-review [scope] [effort] [focus]` — reviews the working diff, a branch, a range or a PR (id or URL) and reports in chat; on a PR it posts **only genuine tagged questions**, and only when typed `/code-review <pr>`. Also owns receiving review findings: verify before implementing. |
+| `skills/questionnaire/SKILL.md` | Written questions for a client or a colleague who holds the facts the work waits on: one markdown file, ordered by what each answer unblocks. Never sends it. |
+| `skills/commit/SKILL.md` | `/commit` — a commit with a generated message, on the current, an existing or a new branch. Never pushes. |
+
+**Workflows** (`workflows/*.js`) are saved scripts that fan a job out over many subagents and merge
+the result; `enableWorkflows` in `settings.json` turns them on and each installs as `/<name>`. The
+validator compiles each one the way the runtime does (`meta` first, no import, no `Date.now`).
+Both exceed the `workflowSizeGuideline` of five agents on purpose (`build` by design: an implementer per task, a verifier per task, then a reviewer per round), so the "Large workflow" notice
+is expected.
+
+**The deliver flow** (`build` inside `deliver`; the map: `docs/delivery.md`):
+
+```mermaid
+flowchart TD
+  T["Triage: scenario, size, risk axes"] --> Q["Every question, once"]
+  Q --> S{"Size?"}
+  S -- "S, docs only" --> IN["Inline edit, one reviewer"]
+  S -- "M, L" --> P["Plan and one owner ok"]
+  P --> B["build workflow: implementer waves, serial verifies, suite, up to 3 reviewer rounds"]
+  B --> TL["Tests by level; real tests only after asking"]
+  IN --> TL
+  TL --> VD["Verdict"]
+```
+
+| Workflow | Does |
+|---|---|
+| `workflows/review-pair.js` | `/review-pair` — `{ range, files?, intent, effort, modelB, repo? }`: a diff too big for one reviewer gets two `code-reviewer`s that each read the whole change with one brief (never a split): A on Sonnet, B on Opus (`modelB` overrides B's model), the spawn count logged before the first one starts, one merger that applies the declared agreement rule and writes one report in the chat language. `repo`, the repository's absolute path, is needed when the session's folder is not the repository: every git command then runs with `-C` on it. |
+| `workflows/build.js` | `build` — `{ tasks: [{ id, files, criteria, verify, dependsOn }], testCmd, risk, repoRoot, request }`: the deliver build. Dependency waves of `implementer`s (parallel on disjoint files, serial when files overlap), each task's `verify` run serially by a `gate-runner` with one retry, `testCmd` once, then up to 3 rounds of a fresh `code-reviewer` on the whole uncommitted diff with one fix call per file. Returns a short summary: status, tasks, suite, rounds, `stop` questions and open findings. |
+
+## Subagents
+
+Analysis and authoring on their own model boundary, so the main context window stays free. All
+default to Sonnet unless the row says otherwise; the caller can override.
+
+| Agent | Does |
+|---|---|
+| `agents/code-reviewer.md` | Stack-agnostic review — defects, regressions, security, clean code, and whether the change did everything its intent and the owner's own request implied (a vacuous test named as a criterion's proof is a P2; a file past 600 lines, or 200+ lines that grew by 30%, gets a split proposal; a comment's wording alone is no finding, a vacuous comment is a P3 to delete) — on a `low` to `max` effort ladder. Returns findings, posts nothing. |
+| `agents/review-security.md` | Works from the exposed surface inward: entry points, trust boundaries, taint paths, authz, secrets. Opus at high effort. Same output contract, so results merge. |
+| `agents/review-performance.md` | Reasons about cost: complexity, per-item I/O, allocations, blocking, caching, queries. No cost stated, no finding. |
+| `agents/investigator.md` | Two modes, backend or frontend (the stack detected from the root's files): `locate` turns a symptom into the exact `file:line` that owns it; `trace` maps a flow from the UI through HTTP and across services over the message bus, hop by hop. Read-only. |
+| `agents/implementer.md` | Writes production code for a scope the caller already decided, at `effort: medium` (the brief may ask for `high`), so an Opus session plans and reviews while Sonnet types. Contained diff, verified, never commits, comments only for a non-obvious why; the non-trivial choices the brief did not state come back as `defaults`, and an owner decision in the brief binds it. |
+| `agents/db-analyst.md` | The only holder of database access, and where `/db` runs: a query, plan or schema read through the CLI clients (non-dev hosts only via `db-ro.ps1`), the cause, the index that would change it, and its cost. Applies nothing. |
+| `agents/ops-analyst.md` | Logs, metrics, profiles and traces of a running service, and where `/logs` runs: Grafana through an inline MCP server (`GRAFANA_URL`, `GRAFANA_TOKEN`) that never reaches the main conversation, plus compose, containers, kubectl, Aspire and log files. Read-only, redacts secrets. |
+| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Haiku at medium effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
+| `agents/gate-runner.md` | Where the `build` workflow runs a verify, the suite or a git line: shell tools only, Haiku at low effort, no CLAUDE.md. Runs the brief's commands and returns their output verbatim; never repairs a red result. |
+
+## Hooks
+
+The safety net: it fires whether or not you remembered. Every hook exits 0 on any internal error —
+a broken hook must never block work (`worktree-root.js` alone fails loudly: a silent failure would leave the session in a worktree that does not exist). The other exceptions are `guard-shell.js` and `secret-scan.js`, which run with `onFailure: "block"`: a missing, unloadable or crashing guard asks (the inline wrapper in settings.json or the hook's own fallback) and never approves. Each has a dependency-free test in `tools/`.
+
+| Hook | Event | Does |
+|---|---|---|
+| `hooks/guard-shell.js` | `PreToolUse` | One entry point for every shell guard, sharing `hooks/lib/`; after five single shell calls in a row it adds a one-line reminder to batch (independent calls in parallel, dependent ones chained in one command but never starting with `cd`), and a `cd X &&` / `cd X;` adds a hint, at most once an hour per session and agent, to use `git -C` and absolute paths instead (a hint, never a decision); a read-only agent can't write to the tracker or a pull request either. Confirms before a commit or push lands on the repository's default branch, and before an action with no undo — dropping or truncating, dropping a stash, force-removing a worktree, expiring the reflog, dropping a database through the EF tool, flushing a cache, tearing down volumes, pruning, deleting a volume, queue, cloud or cluster resource — **including when it is nested inside a `docker exec`, a `sqlcmd -Q` or a pipeline**, which a permission pattern cannot see. A delete inside the session's own Claude temp folder passes in any spelling of it (long, 8.3 short, `C:/` or MSYS `/c/`), and a heredoc body fed to a non-shell (`cat > f`, `node -`) is data, not a command, also after a `cd`, `mkdir`, `ls` or a plain literal assignment on the same line; one fed to a shell (`sh`, `bash`, `pwsh`, `source`, `./x`, `eval`), or written to a Makefile with `make` or `gmake` on the line, or to `.git/hooks/`, `.husky/` or `.githooks/` with `git` on the line (a PowerShell here-string too), is still checked, and so is each line of a PowerShell here-string when a script runner (`pwsh -File`, `./s.ps1`, `iex`) follows; a command launched by `npx`, `pnpx`, `bunx` or `npm`/`pnpm`/`yarn`/`bun` `exec`, `x`, `dlx` (or their `-c` string) gets the same asks and database-host deny as the command itself. It also **asks** when an Azure DevOps write breaks the ALM contract (`lib/alm-contract.js`: a PR without `--work-items` or without squash and delete-source-branch, a work item without `--assigned-to`, `CompletedWork` written, `az devops configure --defaults`; and always the PR completion itself, `az repos pr update --status completed` / `--auto-complete` and `gh pr merge`, while the settings allow the other reversible PR and work item writes), **denies** a raw `sqlcmd`, `psql` or `redis-cli` aimed at a non-dev host (`lib/sql-target.js`, pointing at `db-ro.ps1`) and a shell read (`Get-Content`, `cat`, `grep`, `find -exec`) of a secret file such as `.env`, a key or a token cache (`lib/secret-read.js`: the `Read` deny rules do not cover the shell), **denies** a git write (`checkout`, `switch`, `reset`, `stash` but not `list` / `show`, `rebase`, `commit`, `push`) run by a read-only agent (`agent_type` such as `code-reviewer` or `Explore`; no `agent_type`, no deny), **asks** before a `docker cp` that overwrites a host file outside the working directory or under `~/.claude` (`lib/docker-cp.js`), a push that deletes or forces a ref, a recursive or forced delete (not a delete aimed only at `<temp>/claude/<project>/<this session>/…`, by absolute path or relative after a `cd` / `Set-Location` into it, with only deletes, `cd`s and plain assignments before it on the line and no `..`, wildcard, unresolved variable or link on the way; `Remove-Item` also asks when a junction sits inside the tree, since Windows PowerShell can follow it; nor a non-recursive `rm -f` whose targets are literal paths to existing regular files in the git worktree of the working directory, outside `.git/` and `~/.claude`, with no `cd` or link maker before it) and a `git switch --force` (`lib/destructive.js`), **denies** an unquoted `$ ( ) @ { } \ ; & | %` or backtick, or a `$` or backtick inside double quotes, in the arguments of the allowed kit scripts (`lib/script-args.js`: wrap the value in single quotes; a `"$NAME"` assigned once earlier on the line to a plain literal, with only literal assignments, a literal `cd` or plain git / node / dotnet / npm / npx calls in between and no function or alias defined, is read as its value, so the grant, `--run`, `--lane-remove` and `--test` checks still apply), while an unquoted `<` or `>`, an unbalanced or typographic quote, a non-ASCII character and `db-ro.ps1 -AcceptWriteGrant` still ask, and **rewrites** a single `dotnet test`, `dotnet build`, `npm test`, `npx vitest` or non-follow `docker compose logs` through a filter that keeps the failures and the summary (a build: each distinct error and warning once, with a count) (`lib/output-filter.js`; `# raw` anywhere in the command opts out, and so does any other unquoted `#`: a trailing comment would swallow the wrapper). The second rewrite pins the Azure CLI identity (`lib/az-pin.js`): a single plain `az` command that the user-scope `settings.json` allows and no `deny` or `ask` rule there matches (project settings are not read), run in a directory `workspaces.json` maps to an identity, starts with `$env:AZURE_CONFIG_DIR='<dir>'; ` (PowerShell) or `AZURE_CONFIG_DIR='<dir>' ` (Bash); a chained line, or anything the allow list does not cover, is left to the permission flow and to the manual prefix in `azdo-cli`. `az account set` is denied in `settings.json` and asked about here, nested or not. The same words in a comment, a path, a search pattern (also `git -C <dir> grep` or `log --grep`) or a dry run are ignored. |
+| `hooks/agent-guard.js` | `PreToolUse` (`Agent\|Task`) | Denies a subagent spawn with no `subagent_type`, a `Plan` spawn with no `model` (sonnet; opus only with a data, money, contract or security axis), a spawn with `effort` `max` unless the description or prompt says `owner asked`, and a `fork` unless the prompt says `parent context: <why>`. The two markers are a speed bump (the owner may ask for max or a fork), not security. Any other spawn passes in silence; an error lets it through. |
+| `hooks/mcp-readonly-guard.js` | `PreToolUse` (every MCP tool) | Lets a read-only agent (`hooks/lib/read-only-agents.js`, e.g. `ops-analyst`) call only MCP tools whose first verb reads (get, list, search, read, find, fetch, query); a write verb or no read verb at all (`batch`, `navigate`) is denied: connector servers have per-account names, so no `tools:` allowlist can name them, and an agent reading mail and chats must not be talked into writing. The main session and other agents get no decision. An error lets the call through. |
+| `hooks/read-guard.js` | `PreToolUse` (`Read`) | Denies a Read with no `offset`, `limit` or `allow_large` of a persisted tool output above 20 KB (temp `claude` folder, scratchpad excepted, or a project's `tool-results`), a session transcript (`.claude/projects/**/*.jsonl`, any size) or any other text file above 256 KB, pointing at Grep with a `head_limit` or a ranged Read. Images, PDFs and notebooks pass; an error lets the read through. |
+| `hooks/secret-scan.js` | `PreToolUse` | Blocks a write introducing a provider token, a cloud key, a private key block or a password-bearing connection string, naming the pattern and the line. Placeholders and variable references pass. |
+| `hooks/format-on-edit.js` | `PostToolUse` on `Write`, `Edit`, `MultiEdit` | Formats only the file just written, and does nothing where the project has no such tooling configured. Exits at once on an extension no formatter owns. |
+| `hooks/session-brief.js` | `SessionStart` | Four cached lines of orientation: branch and dirty state, last commit, upstream drift, work item (from the branch name), plus at startup one line once the hook fire log holds enough days to review. No network call. On `/clear` it also adds, once, the hand-off `done-claim` left in `~/.claude/.cache/handoff.json` (branch, head, closing rows; under 2 h old, same cwd). |
+| `hooks/workspace-context.js` | `SessionStart` (`startup|resume|clear|compact`) | Turns the session cwd into one `ALM:` context line (platform, org, project or per-subfolder project, az identity, note) from local-only `~/.claude/workspaces.json` (copy `workspaces.example.json`), and pins the Azure CLI identity by exporting `AZURE_CONFIG_DIR` (and `AZ_IDENTITY`, for PowerShell) through `CLAUDE_ENV_FILE`, so two sessions on different orgs never flip each other's default. It prints two context lines: `ALM:` (absent without a usable map; a map with no matching root prints `ALM: unmapped — ask`) and `Lang: commit it · pr it · ...`, always present (all `en` without a map). Fires again after `/compact`. |
+| `hooks/subagent-lang.js` | `SubagentStart` | Prints the same `Lang:` line, resolved on the subagent's cwd, as additional context, so a subagent writes commit, pr, prComment, items and wiki text in the configured language. |
+| `hooks/pace.js` | `PreToolUse` (`Bash|PowerShell|Agent|Task|Workflow`), `UserPromptSubmit`, `SessionStart` (`resume|compact`), `PreCompact` | Usage pace: reads the shared `~/.claude/.usage-pace.json` and, when the 5h window crosses 70, 85, 92, 96 or 98%, or the 7d window 70, 85, 92, 96, 98 or 99%, adds one context line per band, once per session, agent and window reset. A conditional band slows the chat only when the window is *short* (at the current burn it runs out before its reset; an unknown burn is not short), otherwise it is a notice line; a runway under 30 min (5h) or 2 h (7d) jumps to the closing actions. 5h 98 and 7d 99 are the stop: compact, save state, wait for the cron. The main loop's new `Workflow` is denied from 92 (5h) or 96 (7d) when short, and at the stop, unless the prompt says `pace: owner asked` or `pace: finish`; a subagent hears the notices and, at the stop, is told to close its step; data older than 10 minutes or a window past its reset lifts the brake. After a resume or a compaction it names the checkpoint file and asks to verify the real state first; `PreCompact` prints the checkpoint path first so the summary keeps it. Fails open. Design and files: `docs/usage-pace.md`. |
+| `hooks/done-claim.js` | `Stop` | On in the template (`CLAUDE_DONE_CLAIM=1`; empty turns it off). A turn that edited files and ends claiming success — "fatto", "fixed", "passing" (not a bare "passa") — with no shell command run after the last edit and, in the message, no fenced block, quoted output line (a `> **Detail**` / `> **Dettaglio**` block does not count), inline `` `command` → result ``, honest "non verificato" or a `deliver` verdict (a table with the columns `Livello`, `Comando`, `Riga che decide`, `Stato`, one row per check, outside any code block; the `**Verifica**` title above it is optional, the header anchors it; and a filled `fatto` or `failed` row; the stacked `Livello:` / `Comando:` / `Riga che decide:` / `Stato:` form is still read) is sent back once to show the evidence. The transcript is read backward in 512 KB chunks to the start of the turn (cap 8 MB); a verdict of a turn still cut is sent back once to be rewritten with fresh output (fail closed). A regex over the final message, no tokens; each trigger is logged with the rule that fired in `~/.claude/.cache/done-claim.log` so false positives can be counted. When the turn closed a task (a passing verdict or a `git commit`) at `CLAUDE_LARGE_CONTEXT` or more, it also writes `handoff.json` and prints a `systemMessage` asking for `/clear` (never alongside a block). |
+| `hooks/worktree-root.js` | `WorktreeCreate`, `WorktreeRemove` | Puts the harness's own worktrees (`EnterWorktree`, an agent with `isolation: "worktree"`) under `CLAUDE_WORKTREE_ROOT` as `<root>/<repo>-<name>` instead of inside the checkout, away from the Windows path limit; removal refuses a dirty tree and never deletes the branch. Root unset or empty: beside the repo, `<parent>/<repo>-<name>`. |
+
+## Configuration and tooling
+
+| Path | Purpose |
+|---|---|
+| `CLAUDE.md` | User instructions, kept under 3 KB because every turn pays for them: the route table, the standing rules, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here; the ALM rules that a missing flag breaks are enforced by `lib/alm-contract.js`. |
+| `rules/*.md` | Path-scoped facts per stack (C#, C# tests, tests, EF migrations, TypeScript, Angular, React, UI, SQL, pipelines, docker, documents, kit assets): each loads only when a matching file is read or edited, `paths` as one comma-separated string, 25 lines at most, pointing at the skill that owns the procedure. |
+| `output-styles/owner-80-20.md` | Output style for a senior developer who reads fast: decision first in one bold line, the shortest shape that fits, every item of a multi-ask answered in order, stable prefixed ids (`#D1`, `#F1`, `#I1`, `#H1`, `#P1`), no narration between tools, ask only before the irreversible. Replaces the built-in `Concise`; the template selects it with `"outputStyle": "owner-80-20"` in `settings.json`. |
+| `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, workflows (`enableWorkflows`, `workflowSizeGuideline`, `workflowKeywordTriggerEnabled`), the one allow rule for `db-ro.ps1`, `bashOutputMaxChars` (how many characters of one shell result reach the context), enabled plugins, status line, UI preferences. |
+| `loop.md` | Maintenance prompt that a bare `/loop` runs (installed at `~/.claude/loop.md` like any root file): PR status and active threads, the branch's latest pipeline run, the step log read (`azdo-cli`) then `debug-systematic` suggested when red; read-only. Runs only when the owner types `/loop`: the assistant never starts, schedules or suggests it. |
+| `statusline.js` | Model and effort first, then the folder — or, inside a linked worktree, the worktree root, under the same folder icon — git branch and dirty badges, context bar with token count, the 5h and 7d rate-limit windows with weekly pacing, session cost always shown; a second line only when it has something: the trailing segments of line 1 that do not fit (moved whole, never cut), a cache-cold badge, vim mode. Segments are joined by a dim dot, no brackets; names and branch are hyperlinks. Each render writes the context snapshot `hooks/lib/context-size.js` (`done-claim`) reads, under `~/.claude/.cache/`. With the optional cockpit mod (below) it also shows the last turn's cost and agents and tasks badges. |
+| `mods/cockpit/` | The cockpit mod (a Claude Code plugin, see "Cockpit mod"), installed to `~/.claude/mods/cockpit` like `scripts/`. |
+| `scripts/db-ro.ps1` | Read-only access to non-dev databases — SQL Server (go-sqlcmd), PostgreSQL (`psql`), Redis (`redis-cli`): targets from local-only `~/.claude/db-targets.json` (copy `db-targets.example.json`), by project → environment → engine (`-Env prod -Engine postgres`, `-Project` a name or a path), any string value able to embed `${VAR}` (the project's env file, then the environment) and a Postgres block able to take a `url`; the client runs native, else in WSL, else through docker (`sqlcmd`: native only); the secret travels in the client's own environment variable for that process only (`WSLENV` forwards it into WSL and is restored afterwards); a permission probe runs first (`-Probe` runs it alone): exit 3 when read-only cannot be proven, exit 4 listing the grants when the credential can write — the user is asked once per target and `-AcceptWriteGrant` then runs on the client-side filter alone (reads only, the header says `readonly=NO`) — and write commands in the query are rejected. An environment may set `"readOnly": false` only on a dev host (`devHosts` plus the loopback names; any other host is exit 2 before connecting): no probe and no read filter, the header says `readonly=NO(local)`, the escape filters stay. `hooks/lib/sql-target.js` denies a raw client at a non-dev host and points here. |
+| `scripts/pace-state.mjs` | The chat's own pace state `~/.claude/.cache/pace/<sid>.json`: `--arm --session <id> [--cwd <dir>]` (when the window is short at its brake band, or at its closing band) writes the window needing it with the later reset, `armedAt`, `resumeAt` (reset + 2 min, staggered 0-2 min per session) and the checkpoint path (`<git dir>/deliver/resume-<first 8 of the id>.md`, else `~/.claude/.cache/resume/<sid>.md`) and prints them with `prompt=`, the resume prompt for the `CronCreate` one-shot the chat always creates (and a `note=` to `CronDelete` the previous cron on a re-arm); `--ready` (closing band), `--done` (deletes the file), `--show`. Prunes files older than 7 days. |
+| `scripts/kit-usage.mjs` | Offline usage report (`--days N`, `--config <dir>`, `--json`): the skill references no Read, Bash or PowerShell read of the installed copy opened in the period, the `done-claim` rules that fired and the hooks that crashed (`hook-errors.log`). Node, no dependencies, read-only. |
+| `db-targets.example.json` | Shape of the local-only `~/.claude/db-targets.json` read by `db-ro.ps1`: project → environment → engine (`sql`, `postgres`, `redis`), `${VAR}` values for the secrets, the allowed databases, `readOnly`. Placeholders only. |
+| `workflows/*.js` | Saved workflows, see above; installed to `~/.claude/workflows/`. |
+| `workspaces.example.json` | Shape of the local-only `~/.claude/workspaces.json` read by `hooks/workspace-context.js`: workspace root → platform, org, project (or a subfolder → project map), az identity, account, note, `lang` (global and per root, per key, ISO 639-1 codes, default `en`). Placeholders only. |
+| `settings.overlay.example.json` | Shape of the local-only `~/.claude/settings.overlay.json`: your personal settings on top of `settings.json` (model, output style, extra allow rules, a key removed with `null`). Placeholders only; see "Settings overlay". |
+| `tools/merge-settings.mjs` | Dependency-free merge of the `settings.json` template and the overlay (`--template`, `--overlay`, `--out`), and `--check <live>` that lists the keys where the live file is not that merge. |
+| `install.ps1` | Idempotent install into the Claude config directory, plus `-Check` (drift and environment report, exit 1 on problems) and `-Pull` (import live edits back into the repo, whole skill folders included). Its function groups are dot-sourced from `install/` (`output`, `discovery`, `environment`, `sync`), which is repo-only and never installed. |
+| `statusline/` | The modules `statusline.js` requires (`ansi`, `git`, `cache`, `segments`, `pace`); installed to `~/.claude/statusline/` next to it. |
+| `tools/kit-close.mjs` | Repo-only, run from PowerShell so the install copies persist: closes a kit change: `--head <start sha>` (also the default `--base`), `--message`, `--paths <csv of the files this change owns>` (required: only those are staged and committed, never `-A`); optional `--root`, `--home`, `--dry-run`. Fail-fast, argv only, never a push: the commit, `install.ps1 -Only`, a separate `install.ps1 -Verify -Only`, and `claude plugin test` on the installed cockpit only when a `mods/cockpit/` path changed. Prints the deciding line of each step; exits non-zero naming the first red one. |
+| `tools/validate.mjs` | Dependency-free CI checks: JSON, front matter, cross-references, machine paths and secrets, the line caps (SKILL.md 120), the body skeleton and contract line, the 35-word `Use when` description, explicit-trigger skills locked with `disable-model-invocation`, reference reachability, pinned versions, the agents' contract and output sections, `memory` only with a write tool, no `commands/` folder, and each saved workflow compiled as the runtime does. The checks are split across `validate-assets.mjs`, `validate-budget.mjs`, `validate-content.mjs` and `validate-contract.mjs`. |
+| `tools/*.test.mjs` | One dependency-free `node:test` file per hook entry point or library (`guard-shell`, `secret-scan`, `secret-read`, `format-on-edit`, `session-brief`, `workspace-context`, `worktree-root`, `done-claim`, `output-filter`, `az-pin`, `merge-settings`, `alm-contract`, `sql-target`, `db-ro`, `review-pair`, `kit-usage`, `agent-guard`, `subagent-lang`, `install-options`, `install-only`, `kit-close`, `validate`, `statusline-cockpit`; `done-claim` and `guard-shell` are split by concern, the `*.harness.mjs` files drive them, `guard-shell-shared.test.mjs` holds the shared setup of the `guard-shell` files), covering the true positives and, the part that matters, the false positives. `hook-coldstart` times every wired node hook against a `node -e 0` baseline (`COLDSTART_NODE_MS`, default 250; `COLDSTART_PWSH_MS`, default 1500); `COLDSTART_SKIP=1` skips it on a slow box. |
+| `evals/<skill>/<case>/` | Automated `claude plugin eval` suites (16 suites so far: `pr-create`, `azdo-cli`, `branch-flow`, `user-story-standard` and the `paths:` skills): a `prompt.md` and `graders/*.md` per case, the skill and its neighbours loaded through `plugins:`. Triggering is `tool_used: Skill` (`min: 1` must load, `min: 0` + `max: 0` must stay out), plus a regex on the answer where cheap. No shell or write tool is granted, so no case can touch Azure DevOps, a database or the network. |
+| `evals/skill-triggering.md` | The manual `MUST` / `MUST NOT` rows of the skills with no suite yet, and what a suite cannot express (the `paths:` hidden-until-read gate). The `MUST NOT` rows are the borders between neighbouring assets. |
+| `tools/run-evals.ps1` | Runs only the suites whose `skills/<name>/` or `evals/<name>/` changed against `-Base` (default: the remote default branch): `--ablation none` so the triggering graders score, `--no-publish`, `--max-cost-usd` per suite (`-MaxCostUsd`, default 2), reports under `%TEMP%\kit-evals\`. `-List` shows what would run, `-All` / `-Suite` override, `-Runs` / `-Model` tune; about $0.10 per run, so a suite is roughly $0.5 to $1. |
+| `mcp/servers.example.json` | The Azure DevOps MCP server the skills fall back to, as a mergeable JSON block, and the note on how the `ops-analyst` Grafana servers are wired. Not installed by copying — see below. |
+| `docs/` | Living docs per area, each updated in the branch that changes the area: `asset-rules.md` (why the asset contract is what it is), `delivery.md` (how a change moves, how this repo ships), `hooks.md` (the safety net's design), `usage-pace.md` (the 5h/7d pace, the brake and the resume), `cockpit.md` (the mod's design rules). `docs/plans/` holds `plan-work`'s working files and is ignored by git. |
+
+## What the kit deliberately does not cover
+
+Installed plugins already own these, so no asset restates them — they route to them in one line.
+
+| Area | Owner |
+|---|---|
+| Redis data modelling, clustering, search, security, observability | `redis-development` (off by default, enabled on demand) |
+| Microsoft and .NET API lookup, signatures, samples | `microsoft-docs` |
+| Modern web-platform APIs, CSS features, Core Web Vitals | `modern-web-guidance` |
+| Visual and UX design | `frontend-design` |
+| Cross-session memory | Claude Code's native auto-memory (`memory/` + `MEMORY.md`) |
+| Generic skill-authoring machinery | `skill-creator` |
+| Semantic navigation in C# and TypeScript | `csharp-lsp`, `typescript-lsp` |
+
+## Requirements
+
+- **Claude Code 2.1.308 or later** (CLI, desktop, or IDE extension) — `guard-shell.js` and `secret-scan.js` use `onFailure: "block"`.
+- **Node.js 18+** and **git** on `PATH` — for the status line, the Node hooks, the validator and the tests.
+- **PowerShell 7** as `pwsh` on `PATH`, used by the database scripts.
+- **Microsoft Edge** with remote debugging allowed (`edge://inspect`) — only for the `browser-use` plugin, which attaches to Edge's CDP port rather than launching a browser.
+- A **Nerd Font** in the terminal — the status line draws its badges with Nerd Font glyphs; without one you get replacement boxes.
+- **`az` with the `azure-devops` extension** (`az extension add --name azure-devops`) — the whole ALM pillar depends on the extension specifically. **`gh`**, authenticated, for GitHub repositories.
+- **`dotnet`** with the EF tool, **`docker`**, and **`sqlcmd`** (go-sqlcmd: `db-ro.ps1` runs it native only). The diagnostics skill installs the .NET diagnostic tools on demand.
+- **Language servers** on `PATH`: `dotnet tool install -g csharp-ls` and `npm i -g typescript typescript-language-server`.
+- **`psql` and `redis-cli` are optional**: native, installed in WSL, or run through a container, in that order (`db-ro.ps1` picks the route, preferring an image already present locally over its default `postgres` / `redis` one). `install.ps1 -Check` reports which route each will take.
+- `settings.json` and the hooks are Windows and PowerShell oriented; adjust for macOS or Linux.
+
+## Installation
+
+```powershell
+.\install.ps1            # install or update the Claude config directory, check prerequisites
+.\install.ps1 -Check     # report drift and environment problems, write nothing (exit 1 if any)
+.\install.ps1 -Pull      # bring changes made in the live config back into the repo
+.\install.ps1 -Only rules/a.md,rules/b.md -Base <sha>   # install just these kit assets (settings.json never); exit 1 naming any installed copy that is neither the <sha> content nor the new one, nothing written
+.\install.ps1 -Verify -Only rules/a.md,rules/b.md       # read-only: exit 0 only when repo and home hold the same content for exactly these assets
+```
+
+The installer discovers what the repo contains rather than working from a list, so a new asset needs
+no change here. It copies but never deletes on its own: it **detects and offers to remove** what the kit no
+longer ships and the live config still carries — a `commands/*.md` that now shadows a skill of the same
+name, and retired assets (for example the `dev-loop` skill, `done-check`, `redis-dotnet`, the `test-writer` agent, `az-identity.js`,
+`sql-ro.ps1`) — asking for each. It asks before overwriting `CLAUDE.md` or `settings.json` (`-Force` skips the
+prompt). The chat language is the native `language` setting, which the template leaves unset (English): set it in your overlay (`"language": "Italian"` in `settings.overlay.json`, see `settings.overlay.example.json`) or per repo in `.claude/settings.local.json`; the other aspects (`commit`, `pr`, `prComment`, `items`, `wiki`) are a `lang` block in `workspaces.json`, global and per root (see `workspaces.example.json`). Some settings are personal choices worth reviewing first:
+`model` / `effortLevel` / `alwaysThinkingEnabled` / `advisorModel`, which pick a capability *and* a
+cost profile; `voice` and the push notifications; and
+`autoCompactEnabled: true` — auto-compaction manages the window in the template; `outputStyle: "owner-80-20"`, a communication style the template selects; and the keys of the v3 features — `enableWorkflows`, `workflowSizeGuideline`, `skipWorkflowUsageWarning` with an allow rule for `Workflow(build)` (the build `deliver` launches runs without a prompt), and `workflowKeywordTriggerEnabled: false` (the saved workflows run when typed by name, not when a prompt merely says "workflow"), `bashOutputMaxChars`, and `CLAUDE_DONE_CLAIM` (`1`, the completion gate is on) / `CLAUDE_WORKTREE_ROOT` under `env`, the latter empty in the template (the short worktree root is opt-in).
+
+Then restart Claude Code. `-Check` reports anything that exists only in the live config, which is
+the state where a retired skill keeps firing next to its replacement. Without an overlay, `-Check` does
+not compare `settings.json`: your copy is a personalised merge of the template, by design. With an
+overlay (below) it does.
+
+### Settings overlay
+
+Keep your own choices in `~/.claude/settings.overlay.json` (never in the repo; `settings.overlay.example.json`
+shows the shape) and build the live file from the template instead of merging by hand:
+
+```powershell
+node tools/merge-settings.mjs --template settings.json --overlay ~/.claude/settings.overlay.json --out ~/.claude/settings.json
+node tools/merge-settings.mjs --template settings.json --overlay ~/.claude/settings.overlay.json --check ~/.claude/settings.json
+```
+
+| Where | The overlay does |
+|-------|------------------|
+| objects | merge deeply |
+| scalars | the overlay wins |
+| arrays of strings (`permissions.allow`, …) | ordered union, template first, no duplicates |
+| `hooks.<Event>` | union by matcher and command (`args` included); no hook twice |
+| any other array | the overlay replaces it |
+| a key set to `null` | the key is removed from the result |
+
+`--check` exits 1 and prints the differing keys (`~` differs, `+` missing from the live file, `-` only in it).
+With an overlay, `install.ps1` writes the merge instead of copying the template (asking first when the live
+file differs) and `-Pull` never imports `settings.json`; `-Check` runs `--check`, so a template update that
+never reached the live file shows up there. A setting the app writes itself (`/config`, `/plugin`, `/model`)
+lands only in the live file: copy it into the overlay, or the next install drops it.
+
+## Post-install smoke test
+
+In a new session, started in a directory your `workspaces.json` maps:
+
+1. The first context carries an `ALM:` line naming `<org>`, `<project>` and the az identity.
+2. `az account show --query user.name -o tsv`, run through PowerShell, prints `<identity-user>`.
+3. `dotnet test` through PowerShell, on a run of over 60 output lines, opens with `[output-filter]` and keeps the run's exit code.
+4. `/db "select 1"` against localhost returns `1`.
+5. A worktree opened by Claude Code lands under `<CLAUDE_WORKTREE_ROOT>`.
+6. `/usage` lists the `Explore` subagent on `haiku`.
+
+## Plugins
+
+Register the marketplace once, then install each plugin and restart:
+
+```
+/plugin marketplace add anthropics/claude-plugins-official
+/plugin install redis-development       # Redis, everything but the .NET client (off by default)
+/plugin install microsoft-docs          # live Microsoft and .NET documentation
+/plugin install modern-web-guidance     # web platform, CSS, Core Web Vitals (off by default: enable on demand)
+/plugin install frontend-design         # visual and UX design
+/plugin install skill-creator           # generic skill authoring
+/plugin install csharp-lsp              # C# semantic navigation (needs csharp-ls on PATH)
+/plugin install typescript-lsp          # TypeScript semantic navigation
+/plugin install browser-use             # drives the real Edge profile over CDP
+```
+
+Retired on purpose — `settings.json` keeps `remember` off, so an old install does not come back:
+
+| Plugin | Why it is off |
+|---|---|
+| `remember` | its `PostToolUse` hook runs bash on **every** tool call, about a second each on Windows (upstream issue #913); the native auto-memory covers durable facts |
+| `headroom` | a proxy for context compression; native prompt caching does better on long sessions, and it sends telemetry by default |
+| `code-review` | GitHub-only and posts on its own; the kit's review agents and the native `/code-review` cover it |
+
+The `superpowers` plugin is deliberately **not** enabled: the seven of its skills worth keeping were
+absorbed into the process skills above — compacted, made Windows-native and wired to this stack —
+and enabling it alongside them puts two processes in competition for the same moment.
+
+Browser automation is `browser-use` alone: the real Edge profile, visible and already signed in, and one
+script batches many steps into one call. The Playwright MCP server and Claude in Chrome were retired:
+more tool names in every turn and one round-trip per action. `modern-web-guidance` is off by default
+because its description demands a lookup before every frontend task; `rules/angular.md` and `rules/react.md` cover the
+day-to-day.
+
+A plugin shipping its own MCP server may need extra tooling on the machine. `install.ps1 -Check`
+flags plugins enabled in `settings.json` but not actually installed: the state in which their tools
+silently do not exist.
+
+## Cockpit mod
+
+`mods/cockpit/` is a plugin that adds a side pane beside the chat: a single page: an always-visible header, up to four sections and a row of buttons. `settings.json` loads it with `CLAUDE_CODE_PLUGIN_DIRS` (`~/.claude/mods/cockpit`) and `install.ps1` copies the folder to `~/.claude/mods/` like any asset (`-Check` compares it, `-Pull` imports it, except the engine-generated `.claude-plugin/types/`).
+
+- The pane opens at every session start, unless `~/.claude/cockpit.json` says `{ "autoOpen": false }` (a missing file or key means open); `/cockpit` opens it at any time. The engine places a pane it opens unasked only from 144 columns: in a narrower terminal it waits undrawn, and `/cockpit` (a person's own open, placed at any width) shows it. The `x` in the pane closes it and the status line comes back (while the pane is open the status line prints an empty line, since the pane carries the same data). The content is at most 60 columns wide with one column of margin on each side; everything truncates or wraps to it.
+- Header, at the top of the page: model, effort, what Claude is doing (ready, working, thinking, a tool by name, waiting for a permission), the session cost alone; the folder (one folder icon for a plain folder, a repository or a linked worktree), the branch with ahead/behind and the compact git state; then, after a rule, the `CTX` row (label, bar, fill and tokens, a dim `·` and the cache hit of the last turn — green from 80 %, amber from 50 %, red below; every readout keeps fixed cells, blank when empty, so the bar never changes length), the credits row (the 5h and 7d windows side by side, a dim `·` between them, one row each where the pane is too narrow; the week's pace is the gap segment of the 7d bar and the signed % ending its readout, green when ahead of an even burn, red when behind). While Claude works, and for the 15 minutes after a round, a glow of five cells flows left to right along the whole `CTX` bar, in the bar's own hue: brighter on the fill, a tint of that hue on the empty track; when a credit bar changes colour it pulses three times (not on a session's first reading). The bars are a surface module of their own (`hooks/bar.tsx`, terminal and desktop), so they redraw only themselves; every other surface (mobile, vscode) draws them static. In a new session a value the engine has not measured yet is the last known one, drawn with a dim `~`.
+- One page under the header, in up to four sections told apart by an empty row; `TREND`, `IN PROGRESS` and `LOG` are hidden when empty. `ATTENTION` (`ATTENZIONE` in Italian): the live notifications, a blocking one pinned on top, then the rest newest first (a heavy or read-only Opus agent, a big tool result, a file read again, failed commands, a cold cache after idle, context growth, done claims, a workflow stall, a permission wait); a press opens why it matters and what to do; `nothing to do` when there are none; up to 5 rows and 8 lines (a closed notification takes two, so four of them fill it), `󰍟 +N` opens the rest. `TREND`: the spend split by agent type and the context split by tool, each a bar with its legend; hidden before the first round. `IN PROGRESS`: the session tasks (`tasks 2/5` and the current one), the open round and the workflow run in flight, then one row per running agent not already listed under its flow (a workflow run's running agent shows once, under its flow node, as a toggle open by default: its detail and a trail of its last 8 tool calls, newest first, each with a short label, in memory only; state, type and description, model with an asked-against-got warning, effort, share of the session's tokens, cost, elapsed time, the tool running now; a press opens its total tokens and four token counters); 5 shown, `󰍟 +N` opens the rest; hidden when nothing runs and no task is open. `LOG`: the closed rounds and workflow runs, newest first, each row with its start time, length, cost, share of the session's cost and a count of agents by model; open, it lists its agents, commits, test runs, pull requests, compactions and notifications (the newest node opens by itself); 5 shown, `󰍟 +N` opens the rest, under a day row when the nodes span two or more days.
+- Refresh tiers, while the pane is open: fast (2 s) for the elapsed times; medium (10 s) for git and the context; slow (30 s) for the state file's heartbeat, the ALM line and the done-claim log (closed, only the agents' list, and only while one runs or a permission waits). The pull request and the repo's default branch are read at most every 5 min in the background: `gh pr view` on GitHub; on Azure DevOps `az repos pr list` with the org of the ALM line and the az config folder of its identity (`~/.azure-<identity>`, when present), never the CLI default (no checks are shown there). With the same read (at once for a PR just made in the chat) every saved PR not yet ended (merged or closed) is read again by its number, so its state follows; an ended one is not read again, and one that cannot be read keeps its last state. No CLI or no PR: none is added.
+- Session data: what must survive a resume (the history of finished agents, the pull requests of the chat, the session log, the context samples) lives in `~/.claude/.cache/cockpit-data-<session>.json`, written like the state file (at most every 3 s) and read when the session starts or resumes; an agent still running when its session ended is kept as interrupted. A state file from before the data file hands its history and pull requests over once.
+- Cleanup: the status line's hourly prune keeps `cockpit-data-<session>.json` while `~/.claude/projects/*/<session>.jsonl` exists (sessions are kept `cleanupPeriodDays`, 90 days by default) and deletes it when the transcript is gone, checked with one directory listing per project folder; nothing is deleted when the projects folder cannot be listed. `cockpit-<session>.json` stays the 3-day handshake with the status line.
+- Alerts, as `$.ui.toast`, each once per episode (raised again only after the cause cleared): context at 80 % or more, 5h credits at 10 % left or less, a subagent that failed. What a session was resumed with is not news and raises nothing.
+- Language: every text of the pane is in `hooks/strings.ts` in English and Italian. The language is the `lang` of `~/.claude/cockpit.json` (`{ "lang": "it" }`), read at every session start; English when the file is missing or says anything else. The same file holds `autoOpen` (see above). The file is outside the kit: the install never touches it.
+- Buttons on the last row of the page: `compact` runs the compaction with instructions (always in English, whatever the pane's language: what to keep: current task, decisions and why, open tasks; what to drop: summarized tool output; it beats from 75 % of the autocompact threshold).
+- A credit window reads `5h ▰▰▰▱  63% ↻  2h10m`: label, bar, percentage, then a 6-cell countdown (`   45m`, ` 2h14m`, ` 3d06h`), no reset clock; a window with no countdown keeps those cells blank.
+- The mod writes the handshake to `~/.claude/.cache/cockpit-<session>.json` (pane open or closed, last turn cost, agent counts, tasks, token counts); `statusline.js` only reads it. The pane counts as open for the status line only while the mod refreshes it (every 30 s, `at`); an `open: true` older than 90 s (three beats) is ignored, so a reloaded mod never leaves the line hidden. `statusLine.refreshInterval` is `5` in the template, so the line picks up the pane state and the running agents without waiting for the next message.
+- `~/.claude/mods` is kit-owned: `install.ps1` copies the whole mod there, tests and check included, and a later install overwrites local edits (change the repo, not the live copy).
+- The status line caches the git results per folder (the status for 30 s, the linked-worktree check for 10 min) under `~/.claude/.cache/` and writes its rate-limit cache only when a value changes, so a short `refreshInterval` stays cheap.
+- `statusline.js` works without the mod: no state file means no cockpit segments and the line never hides.
+- The icon is the checked-in `.claude-plugin/icon.png`.
+- Check: `claude plugin test mods/cockpit`, `claude plugin validate mods/cockpit` and `node --test tools/statusline-cockpit.test.mjs` (the status line on a sample payload in each cockpit state, and the cache pruning).
+
+## MCP servers
+
+MCP servers do not live in the Claude config directory, so copying files does not install them.
+Register them user-scoped, replacing the placeholder with your own organization:
+
+```powershell
+npm install -g @azure-devops/mcp
+claude mcp add --scope user azdo-<org-alias> -- mcp-server-azuredevops <your-org> -d core repositories work-items search
+```
+
+The global install starts the server in about a second; `npx -y` checks the registry at every
+session start and can hit the MCP connect timeout. Update it with `npm install -g @azure-devops/mcp@latest`.
+
+One Azure DevOps entry per organization; the skills discover the server at runtime and match the
+organization from the git remote, so any naming scheme works.
+
+There is no database MCP server: database access is the CLI (`scripts/db-ro.ps1`, above), so the
+credential never enters a tool call and the hook can see the command. **Grafana** is defined inline in
+`agents/ops-analyst.md` as two HTTP servers (`grafana-staging`, `grafana-prod`) that exist only inside
+that agent and never reach the main conversation. They are not registered with `claude mcp add`: run
+the Grafana MCP server in HTTP mode for each environment — its own `GRAFANA_URL` and service-account
+token live in *that* process's environment, never in the kit — and serve them on
+`http://localhost:8000/mcp` (staging) and `http://localhost:8001/mcp` (prod), the URLs written in the agent's
+front matter — another port means editing those two lines.
+
+**CLI first.** A skill reaches for an MCP server only for what the CLI does not have: reading a work
+item discussion, attachments, PR comment threads, run logs, full-text search, and a project's work
+item types and states. `azdo-cli` lists each one with the reason.
+
+## Environment variables
+
+| Variable | Who needs it | Value |
+|---|---|---|
+| `CLAUDE_HOOKS` | every hook in `settings.json` | The hooks directory inside your Claude config directory. Hooks run in *exec* form with no shell to expand variables, which is why the Node ones read it themselves. **Without it they fall back to `~/.claude/hooks`**, so a default install keeps every guard on; only a relocated config directory needs it (a hook that cannot be found still exits 0 by design, and `install.ps1 -Check` notices). `install.ps1` sets it at user level. |
+| `CLAUDE_WORKTREE_ROOT` | `branch-flow` (worktrees) | A short root for every worktree (`<root>/<repo>-<topic>`), keeping deep repos under the Windows path limit. Empty in the template: worktrees go beside the repo. |
+| `CLAUDE_DONE_CLAIM` | `hooks/done-claim.js` | `1` turns the completion gate on: a turn that edited files and claims success without evidence is sent back once. `1` in the template; empty turns it off. |
+| `CLAUDE_LARGE_CONTEXT` | `hooks/lib/context-size.js` | Token count (default `120000`; positive number, else the default) from which `done-claim` asks for `/clear` after a closed task. |
+| `WSLENV` | `scripts/db-ro.ps1` | Not set by you: the script appends the credential variable to it for the one WSL client process and restores it afterwards. Listed because the script reads and writes it. |
+| `CLAUDE_CONFIG_DIR` | the hooks, `statusline.js` | Claude Code's own variable; the caches and logs follow a relocated config directory. Rarely set. |
+| `COLUMNS` | `statusline.js` | Terminal width the status line right-aligns to and fits its lines to (trailing segments of line 1 move to line 2 when it is narrower); falls back to 80 when unset. |
+| `USERPROFILE`, `LOCALAPPDATA` | the PowerShell scripts | Standard Windows variables, listed so the dependency is explicit. |
+
+Everything `settings.json` sets for the session — the auto-compaction threshold, the debug level, the
+mouse and notification behaviour, the PowerShell tool, OSC 8 hyperlinks — is documented inline in
+that file next to each value.
+
+## Habits
+
+- `/btw` for a side question: it answers without polluting the working context.
+- `/branch` to try an alternative without losing the current conversation.
+- `/rewind` before a risky attempt, so a bad turn is undone rather than argued away.
+
+## Validation
+
+```powershell
+node tools/validate.mjs
+node --test tools/*.test.mjs
+```
+
+Nothing here compiles, so a broken front matter, a hook pointing at an uncommitted file, or a skill
+that quietly grew past its cap would only surface when Claude Code stopped loading an asset. Both
+commands run in CI on every pull request and on pushes to `main`, alongside a syntax check of the
+status line and a parse of every PowerShell script.
+
+## Adapting it to your project
+
+Three things are placeholders on purpose, because this repository is public: **Azure DevOps
+organization and project names**, **absolute machine paths**, and **addresses**. Replace them in the
+local-only `workspaces.json` (from `workspaces.example.json`) and in `mcp/servers.example.json`.
+
+Everything else is meant to be opinionated. If a pattern does not match your project, change the
+skill — `skill-forge` tells you how to do it without breaking the contract, and the validator tells
+you if you did.
+
+## License
+
+[MIT](LICENSE) © 2026 Davide Piccinini

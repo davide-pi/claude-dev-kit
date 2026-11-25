@@ -1,0 +1,215 @@
+import type { CockpitEvent, CockpitLogEntry } from '../types'
+import { ROUND_LIST_KEEP, endRoundOf } from './round-capture'
+
+/** The events kept: the oldest go first. */
+export const EVENTS_KEEP = 300
+
+/** `list` with `event` last; one with a `key` already in the list is not added twice. The list keeps the newest `EVENTS_KEEP`. */
+export function recordEvent(list: readonly CockpitEvent[] | undefined, event: CockpitEvent): CockpitEvent[] {
+  const events = list ?? []
+  if (event.key !== undefined && events.some(e => e.kind === event.kind && e.key === event.key)) return events.slice()
+  // a row older than the newest (a block read from the log) takes its place by time
+  return [...events, event].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e).slice(-EVENTS_KEEP)
+}
+
+/** `list` with the entry of agent `id` of `kind` agent replaced (a turn that ended twice is one row). */
+export const recordAgentEvent = (list: readonly CockpitEvent[] | undefined, event: CockpitEvent): CockpitEvent[] =>
+  recordEvent((list ?? []).filter(e => !(e.kind === 'agent' && e.id !== undefined && e.id === event.id)), event)
+
+// ── The session log: what FATTO lists. A ring of its own, so its kinds never evict the agent events the costs read. ──
+
+/** The session log's entries kept: the oldest go first. */
+export const SESSION_LOG_KEEP = 300
+
+/**
+ * `log` with `entry` in its place by time; one whose kind and `key` are already there is not added twice, except a 'flow' entry, which replaces
+ * its node (a resumed run closes again). The log keeps the newest `SESSION_LOG_KEEP`.
+ */
+export const recordLog = (log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] => recordLogCount(log, entry).log
+
+/** `recordLog` and how many entries the keep dropped (the count the log's `logTrimmed` grows by). */
+export function recordLogCount(log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): { log: CockpitLogEntry[]; trimmed: number } {
+  const all = log ?? []
+  const isSame = (e: CockpitLogEntry) => entry.key !== undefined && e.kind === entry.kind && e.key === entry.key
+  if (entry.kind !== 'flow' && all.some(isSame)) return { log: all.slice(), trimmed: 0 }
+  const entries = entry.kind === 'flow' ? all.filter(e => !isSame(e)) : all
+  const sorted = [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e)
+  return { log: sorted.slice(-SESSION_LOG_KEEP), trimmed: Math.max(0, sorted.length - SESSION_LOG_KEEP) }
+}
+
+/** What `withLogged` reads of a snapshot: its log, and the round state that says which round is open. */
+type Logging = { sessionLog?: CockpitLogEntry[]; logTrimmed?: number; roundSeq?: number; claudeState?: { kind: string } }
+
+/**
+ * `s` with `entry` recorded in its session log and the entries the keep dropped added to `logTrimmed`. The entry takes the conversation round it is logged in:
+ * `round` when given, else the one open now, else the last one concluded; an entry with a round of its own, a 'round' entry, and one logged before any round stay as they are.
+ */
+export function withLogged<S extends Logging>(s: S, entry: CockpitLogEntry, round?: number): S {
+  const at = entry.kind === 'round' || entry.round !== undefined ? undefined : (round ?? endRoundOf(s))
+  const { log, trimmed } = recordLogCount(s.sessionLog, at === undefined ? entry : { ...entry, round: at })
+  return { ...s, sessionLog: log, ...(trimmed > 0 && { logTrimmed: (s.logTrimmed ?? 0) + trimmed }) }
+}
+
+/** `s` with a tool call's log `entries` (test runs, commits, a PR) in its session log: they never enter the agents' `events` ring, so no number of them evicts an agent event. */
+export function withLogEntries<S extends Logging>(s: S, entries: readonly CockpitLogEntry[]): S {
+  return entries.reduce((acc, e) => withLogged(acc, e), s)
+}
+
+/** `log` with the newest round entry that has no cost given `usd`: a round whose cost was measured after it ended. An entry that has one, or no round, leaves the log as it was. */
+export function withRoundUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
+  const newest = newestRound(log)
+  if (newest === undefined || newest.usd !== undefined) return log?.slice()
+  const own = Math.max(0, usd - roundFlowUsd(log, newest, Infinity))
+  return log?.map(e => (e === newest ? { ...e, usd: own } : e))
+}
+
+/** `log` with the newest round entry given `usd`, replacing the one it has: the header's figure and the log's stay one. No round leaves the log as it was. */
+export function withRoundLastUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
+  const newest = newestRound(log)
+  return newest === undefined ? log?.slice() : log?.map(e => (e === newest ? { ...e, usd } : e))
+}
+
+/** The cost of the flow agents (log agents with a `runId`) that ended between `from` and `to`: theirs belongs to the flow, not to the round. */
+export const flowUsdIn = (log: readonly CockpitLogEntry[] | undefined, from: number, to: number): number =>
+  (log ?? []).reduce((n, e) => (e.kind === 'agent' && e.runId !== undefined && e.at >= from && e.at <= to ? n + (e.usd ?? 0) : n), 0)
+
+/** The flow cost from the start of the round entry `round` (it ended at `at`, after `ms`) up to `to` (its end by default). */
+export const roundFlowUsd = (log: readonly CockpitLogEntry[] | undefined, round: CockpitLogEntry, to = round.at): number => flowUsdIn(log, round.at - (round.ms ?? 0), to)
+
+/** The newest round entry of `log`; none without one. */
+const newestRound = (log: readonly CockpitLogEntry[] | undefined): CockpitLogEntry | undefined =>
+  (log ?? []).filter(e => e.kind === 'round').reduce<CockpitLogEntry | undefined>((n, e) => (n === undefined || e.at >= n.at ? e : n), undefined)
+
+/** The flow cost since the start of the newest round entry of `log`, the flow agents that ended after it (the loop idle) included; 0 without one. */
+export const lastRoundFlowUsd = (log: readonly CockpitLogEntry[] | undefined): number => {
+  const newest = newestRound(log)
+  return newest === undefined ? 0 : roundFlowUsd(log, newest, Infinity)
+}
+
+const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal', 'flow', 'error']
+const SEVERITIES: readonly string[] = ['block', 'warn', 'info']
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+/** A conversation round number: a whole number from 1 on. */
+export const isRoundNo = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1
+
+/** A record of positive counts by name out of a parsed file; none for anything else or an empty one. */
+export function parseToolCounts(value: unknown): Record<string, number> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const counts = Object.entries(value).filter((e): e is [string, number] => isNum(e[1]) && e[1] > 0)
+  return counts.length > 0 ? Object.fromEntries(counts) : undefined
+}
+
+const isRecordOf = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** The permission waits a round entry keeps (count, total ms, the newest ten); none for anything else. */
+export function parseWaits(value: unknown): CockpitLogEntry['waits'] {
+  if (!isRecordOf(value) || !isNum(value.n) || !isNum(value.ms)) return undefined
+  const list = Array.isArray(value.list)
+    ? value.list.flatMap((w: unknown) => (isRecordOf(w) && typeof w.tool === 'string' && isNum(w.ms) ? [{ tool: w.tool, ms: w.ms }] : [])).slice(-ROUND_LIST_KEEP)
+    : []
+  return { n: value.n, ms: value.ms, ...(list.length > 0 && { list }) }
+}
+
+/** The failed tool calls a round entry keeps (count, the newest ten with their error text); none for anything else. */
+export function parseFails(value: unknown): CockpitLogEntry['fails'] {
+  if (!isRecordOf(value) || !isNum(value.n)) return undefined
+  const list = Array.isArray(value.list)
+    ? value.list.flatMap((f: unknown) => (isRecordOf(f) && typeof f.tool === 'string' && typeof f.text === 'string' ? [{ tool: f.tool, text: f.text }] : [])).slice(-ROUND_LIST_KEEP)
+    : []
+  return { n: value.n, ...(list.length > 0 && { list }) }
+}
+
+/** The session log a data file keeps: the entries with a time and a known kind (the other fields only when they have their type), the newest `SESSION_LOG_KEEP`; none for anything else. */
+export const parseLog = (value: unknown): CockpitLogEntry[] | undefined => parseLogCount(value).log
+
+/** `parseLog` and how many valid entries the keep dropped. */
+export function parseLogCount(value: unknown): { log: CockpitLogEntry[] | undefined; trimmed: number } {
+  if (!Array.isArray(value)) return { log: undefined, trimmed: 0 }
+  const parsed = value.flatMap((v: unknown): CockpitLogEntry[] => {
+    if (typeof v !== 'object' || v === null) return []
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc, prompt, files, ctxPct, anchor, waits, fails, agent, round, endRound, lane } = v as Record<string, unknown>
+    if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
+    const counts = parseToolCounts(tools)
+    const parsedWaits = parseWaits(waits)
+    const parsedFails = parseFails(fails)
+    return [{
+      at,
+      kind: kind as CockpitLogEntry['kind'],
+      ...(typeof key === 'string' && { key }),
+      ...(isRoundNo(round) && { round }),
+      ...(isRoundNo(endRound) && { endRound }),
+      ...(typeof lane === 'number' && Number.isInteger(lane) && lane >= 0 && { lane }),
+      ...(typeof runId === 'string' && { runId }),
+      ...(typeof agent === 'string' && { agent }),
+      ...(typeof text === 'string' && { text }),
+      ...(typeof desc === 'string' && { desc }),
+      ...(isNum(usd) && { usd }),
+      ...(isNum(ms) && { ms }),
+      ...(isNum(tokens) && { tokens }),
+      ...(isNum(after) && { after }),
+      ...(typeof isFailed === 'boolean' && { isFailed }),
+      ...(typeof model === 'string' && { model }),
+      ...((typeof effort === 'string' || isNum(effort)) && { effort }),
+      ...(isNum(n) && { n }),
+      ...(typeof severity === 'string' && SEVERITIES.includes(severity) && { severity: severity as CockpitLogEntry['severity'] }),
+      ...(counts && { tools: counts }),
+      ...(typeof prompt === 'string' && { prompt }),
+      ...(Array.isArray(files) && files.every(f => typeof f === 'string') && { files: files as string[] }),
+      ...(isNum(ctxPct) && { ctxPct }),
+      ...(typeof anchor === 'string' && { anchor }),
+      ...(parsedWaits && { waits: parsedWaits }),
+      ...(parsedFails && { fails: parsedFails }),
+    }]
+  })
+  const entries = parsed.slice(-SESSION_LOG_KEEP)
+  return { log: entries.length > 0 ? entries : undefined, trimmed: parsed.length - entries.length }
+}
+
+/** The key of the next compact entry: after the highest the log holds, so a resumed session (whose counters restart) never meets a saved key. */
+export const nextCompactKey = (log: readonly CockpitLogEntry[] | undefined): string =>
+  `c${1 + Math.max(0, ...(log ?? []).filter(e => e.kind === 'compact').map(e => Number(e.key?.slice(1)) || 0))}`
+
+/** The key of the newest compact entry; none without one. */
+export const lastCompactKey = (log: readonly CockpitLogEntry[] | undefined): string | undefined =>
+  log?.filter(e => e.kind === 'compact').at(-1)?.key
+
+/** `log` with the compact entry of `key` given its `after` reading, once: an entry that has one, or an unknown key, leaves the log as it was. */
+export function withCompactAfter(log: readonly CockpitLogEntry[] | undefined, key: string, after: number): CockpitLogEntry[] | undefined {
+  if (!log?.some(e => e.kind === 'compact' && e.key === key && e.after === undefined)) return log?.slice()
+  return log.map(e => (e.kind === 'compact' && e.key === key ? { ...e, after } : e))
+}
+
+// The test runners the log recognises, at a command boundary (alone or in a chain).
+const TEST_COMMAND = /(?:^|[\s;&|(])(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test|dotnet\s+test|pytest|vitest|jest|go\s+test|cargo\s+test|node\s+--test|claude\s+plugin\s+test)(?![\w-])/
+
+/** Whether a Bash command runs tests. */
+export const isTestCommand = (cmd: string): boolean => TEST_COMMAND.test(cmd)
+
+const COMMIT_COMMAND = /(?:^|[;&|(]\s*)git\s+(?:-C\s+\S+\s+)?commit\b/
+
+/** Whether a Bash command makes a git commit (alone or in a chain). */
+export const isCommitCommand = (cmd: string): boolean => COMMIT_COMMAND.test(cmd)
+
+/**
+ * The log entries a Bash call makes: a test run (ok or failed), a `git commit` that exited 0 (by its short hash), a pull request that was created (by its number).
+ * A chain makes one entry per part, in this order; a failed commit or PR create makes none.
+ */
+export function bashLog(call: { command: string; arg?: string; out: string; isOk: boolean; at: number; pr?: { number: number; title: string }; flow?: { agent: string; runId: string } }): CockpitLogEntry[] {
+  const commit = call.isOk && isCommitCommand(call.command) ? commitInfo(call.out) : undefined
+  // a flow agent's call is its flow's: the entry names the agent and the run
+  const by = call.flow ? { runId: call.flow.runId, agent: call.flow.agent } : {}
+  return [
+    ...(isTestCommand(call.command) ? [{ at: call.at, kind: 'test' as const, ...(call.arg !== undefined && { text: call.arg }), isFailed: !call.isOk, ...by }] : []),
+    ...(call.isOk && isCommitCommand(call.command) ? [{ at: call.at, kind: 'commit' as const, ...(commit !== undefined && { key: commit.hash, text: commit.subject === '' ? commit.hash : commit.subject }), ...by }] : []),
+    ...(call.isOk && call.pr ? [{ at: call.at, kind: 'pr' as const, key: String(call.pr.number), text: call.pr.title, ...by }] : []),
+  ]
+}
+
+/** The short hash and the subject `git commit` prints (`[branch abc1234] subject`); none when the output has no such line. */
+export function commitInfo(out: string): { hash: string; subject: string } | undefined {
+  const found = /\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\][ \t]*([^\r\n]*)/.exec(out)
+  return found?.[1] === undefined ? undefined : { hash: found[1], subject: (found[2] ?? '').trim() }
+}
+
+/** The short hash `git commit` prints; none when the output has no such line. */
+export const commitHash = (out: string): string | undefined => commitInfo(out)?.hash

@@ -1,0 +1,235 @@
+diff --git a/OrdersApi/Controllers/ExportController.cs b/OrdersApi/Controllers/ExportController.cs
+new file mode 100644
+index 0000000..bc56fb2
+--- /dev/null
++++ b/OrdersApi/Controllers/ExportController.cs
+@@ -0,0 +1,26 @@
++using Microsoft.AspNetCore.Mvc;
++using OrdersApi.Services;
++
++namespace OrdersApi.Controllers;
++
++[ApiController]
++[Route("api/export")]
++public sealed class ExportController : ControllerBase
++{
++    private readonly ExportService _export;
++    private readonly IConfiguration _config;
++
++    public ExportController(ExportService export, IConfiguration config)
++    {
++        _export = export;
++        _config = config;
++    }
++
++    [HttpGet("{customerId:int}")]
++    public async Task<IActionResult> Export(int customerId, CancellationToken ct)
++    {
++        var dir = _config["Export:Directory"] ?? Path.GetTempPath();
++        var path = await _export.ExportCustomerOrdersAsync(customerId, dir, ct);
++        return PhysicalFile(path, "text/csv", Path.GetFileName(path));
++    }
++}
+diff --git a/OrdersApi/Controllers/OrdersController.cs b/OrdersApi/Controllers/OrdersController.cs
+index 13c4cdb..fdc4fe8 100644
+--- a/OrdersApi/Controllers/OrdersController.cs
++++ b/OrdersApi/Controllers/OrdersController.cs
+@@ -29,6 +29,19 @@ public sealed class OrdersController : ControllerBase
+     public async Task<ActionResult<IReadOnlyList<Order>>> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+         => Ok(await _orders.ListAsync(CurrentCustomerId, page, pageSize, ct));
+ 
++    [HttpGet("search")]
++    public async Task<ActionResult<IReadOnlyList<Order>>> Search([FromQuery] string status, CancellationToken ct)
++        => Ok(await _orders.SearchAsync(CurrentCustomerId, status, ct));
++
++    [HttpPost("{id:int}/discount")]
++    public async Task<ActionResult<decimal>> Discount(int id, CancellationToken ct)
++    {
++        var order = await _orders.GetAsync(id, ct);
++        if (order is null) return NotFound();
++        if (order.CustomerId != CurrentCustomerId) return Forbid();
++        return Ok(await _orders.ApplyDiscountAsync(id, ct));
++    }
++
+     [HttpPost("{id:int}/confirm")]
+     public async Task<IActionResult> Confirm(int id, CancellationToken ct)
+     {
+diff --git a/OrdersApi/Data/OrderRepository.cs b/OrdersApi/Data/OrderRepository.cs
+index f2dc1ec..fb19fa8 100644
+--- a/OrdersApi/Data/OrderRepository.cs
++++ b/OrdersApi/Data/OrderRepository.cs
+@@ -10,6 +10,8 @@ public interface IOrderRepository
+     Task<IReadOnlyList<Order>> ListByCustomerAsync(int customerId, int page, int pageSize, CancellationToken ct);
+     Task<Customer?> GetCustomerAsync(int customerId, CancellationToken ct);
+     Task UpdateTotalAsync(int orderId, decimal total, CancellationToken ct);
++    Task<IReadOnlyList<Order>> SearchAsync(int customerId, string status, CancellationToken ct);
++    Task<int> CountByStatusAsync(OrderStatus status, CancellationToken ct);
+ }
+ 
+ public sealed class OrderRepository : IOrderRepository
+@@ -47,4 +49,17 @@ public sealed class OrderRepository : IOrderRepository
+         const string sql = "UPDATE Orders SET Total = @total WHERE Id = @orderId";
+         await _db.ExecuteAsync(new CommandDefinition(sql, new { orderId, total }, cancellationToken: ct));
+     }
++
++    public async Task<IReadOnlyList<Order>> SearchAsync(int customerId, string status, CancellationToken ct)
++    {
++        var sql = $"SELECT Id, CustomerId, Status, Total, CreatedAt FROM Orders WHERE CustomerId = {customerId} AND Status = '{status}' ORDER BY CreatedAt DESC";
++        var rows = await _db.QueryAsync<Order>(new CommandDefinition(sql, cancellationToken: ct));
++        return rows.ToList();
++    }
++
++    public async Task<int> CountByStatusAsync(OrderStatus status, CancellationToken ct)
++    {
++        const string sql = "SELECT COUNT(*) FROM Orders WHERE Status = @status";
++        return await _db.ExecuteScalarAsync<int>(new CommandDefinition(sql, new { status = (int)status }, cancellationToken: ct));
++    }
+ }
+diff --git a/OrdersApi/Program.cs b/OrdersApi/Program.cs
+index 8c9a01a..666b8d9 100644
+--- a/OrdersApi/Program.cs
++++ b/OrdersApi/Program.cs
+@@ -11,6 +11,8 @@ builder.Services.AddAuthorization();
+ builder.Services.AddScoped<IDbConnection>(_ => new SqlConnection(builder.Configuration.GetConnectionString("Orders")));
+ builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+ builder.Services.AddScoped<OrderService>();
++builder.Services.AddScoped<PricingService>();
++builder.Services.AddScoped<ExportService>();
+ builder.Services.AddScoped<INotificationService, SmtpNotificationService>();
+ 
+ var app = builder.Build();
+diff --git a/OrdersApi/Services/ExportService.cs b/OrdersApi/Services/ExportService.cs
+new file mode 100644
+index 0000000..10e638d
+--- /dev/null
++++ b/OrdersApi/Services/ExportService.cs
+@@ -0,0 +1,57 @@
++using System.Globalization;
++using System.Text;
++using OrdersApi.Data;
++using OrdersApi.Models;
++
++namespace OrdersApi.Services;
++
++public sealed class ExportService
++{
++    private const string SftpPassword = "FAKE-sftp-password-not-a-real-secret";
++    private const string SftpUser = "orders-export";
++
++    private readonly IOrderRepository _repo;
++    private readonly ILogger<ExportService> _log;
++
++    public ExportService(IOrderRepository repo, ILogger<ExportService> log)
++    {
++        _repo = repo;
++        _log = log;
++    }
++
++    public async Task<string> ExportCustomerOrdersAsync(int customerId, string outputDir, CancellationToken ct)
++    {
++        var orders = await _repo.ListByCustomerAsync(customerId, 1, 500, ct);
++        var path = Path.Combine(outputDir, $"orders-{customerId}-{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
++        File.WriteAllText(path, "OrderId;Email;Status;Total;CreatedAt\n");
++
++        foreach (var order in orders)
++        {
++            ct.ThrowIfCancellationRequested();
++            var customer = await _repo.GetCustomerAsync(order.CustomerId, ct);
++            var line = string.Join(';',
++                order.Id.ToString(CultureInfo.InvariantCulture),
++                customer?.Email ?? "",
++                order.Status.ToString(),
++                order.Total.ToString(CultureInfo.InvariantCulture),
++                order.CreatedAt.ToString("O")) + "\n";
++            try
++            {
++                File.AppendAllText(path, line);
++            }
++            catch (OperationCanceledException) when (ct.IsCancellationRequested)
++            {
++                throw;
++            }
++            catch (Exception)
++            {
++            }
++        }
++
++        _log.LogInformation("Exported {Count} orders for customer {CustomerId} to {Path}", orders.Count, customerId, path);
++        return path;
++    }
++
++    public string BuildUploadCommand(string path)
++        => $"sftp {SftpUser}@export.internal:{Path.GetFileName(path)} --password {SftpPassword}";
++}
+diff --git a/OrdersApi/Services/OrderService.cs b/OrdersApi/Services/OrderService.cs
+index 2992b7c..563b826 100644
+--- a/OrdersApi/Services/OrderService.cs
++++ b/OrdersApi/Services/OrderService.cs
+@@ -8,9 +8,11 @@ public sealed class OrderService
+     private readonly IOrderRepository _repo;
+     private readonly INotificationService _notifier;
+     private readonly ILogger<OrderService> _log;
++    private readonly PricingService _pricing;
+ 
+-    public OrderService(IOrderRepository repo, INotificationService notifier, ILogger<OrderService> log)
++    public OrderService(IOrderRepository repo, INotificationService notifier, ILogger<OrderService> log, PricingService pricing)
+     {
++        _pricing = pricing;
+         _repo = repo;
+         _notifier = notifier;
+         _log = log;
+@@ -39,6 +41,20 @@ public sealed class OrderService
+             await _notifier.SendOrderConfirmedAsync(customer.Email, order, ct);
+     }
+ 
++    public async Task<decimal> ApplyDiscountAsync(int orderId, CancellationToken ct)
++    {
++        var order = await _repo.GetAsync(orderId, ct) ?? throw new KeyNotFoundException($"Order {orderId} not found");
++        var customer = _repo.GetCustomerAsync(order.CustomerId, ct).Result;
++        var discounted = _pricing.ApplyDiscount(order, customer);
++        if (customer.IsPremium)
++            _log.LogInformation("Premium discount applied to order {OrderId}", orderId);
++        await _repo.UpdateTotalAsync(orderId, discounted, ct);
++        return discounted;
++    }
++
++    public async Task<IReadOnlyList<Order>> SearchAsync(int customerId, string status, CancellationToken ct)
++        => await _repo.SearchAsync(customerId, status, ct);
++
+     public static decimal ComputeTotal(Order order)
+     {
+         decimal total = 0;
+diff --git a/OrdersApi/Services/PricingService.cs b/OrdersApi/Services/PricingService.cs
+new file mode 100644
+index 0000000..d8334d4
+--- /dev/null
++++ b/OrdersApi/Services/PricingService.cs
+@@ -0,0 +1,28 @@
++using OrdersApi.Models;
++
++namespace OrdersApi.Services;
++
++public sealed class PricingService
++{
++    private const decimal PremiumRate = 0.10m;
++    private const decimal LegacyVatRate = 0.20m;
++    private const decimal ShippingFee = 4.90m;
++
++    public decimal ApplyDiscount(Order order, Customer customer)
++    {
++        var rate = IsPremiumCustomer(customer) ? PremiumRate : 0m;
++        return order.Total - rate;
++    }
++
++    public decimal ComputeTotalWithShipping(Order order)
++    {
++        decimal total = 0;
++        for (var i = 0; i <= order.Lines.Count; i++)
++            total += order.Lines[i].Quantity * order.Lines[i].UnitPrice;
++        return order.Lines.Count >= 3 ? total : total + ShippingFee;
++    }
++
++    private static bool IsPremiumCustomer(Customer customer) => customer.Id > 0;
++
++    private static decimal LegacyTax(decimal amount) => Math.Round(amount * LegacyVatRate, 2);
++}

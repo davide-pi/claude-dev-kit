@@ -1,0 +1,209 @@
+import { atom, read } from 'claude-code'
+import type { EngineInterface } from 'claude-code'
+
+import type { CockpitAlm, CockpitPr } from '../types'
+import { INITIAL } from './state'
+import { patch } from './store'
+import {
+  azArgv,
+  azureRepo,
+  isAzureRemote,
+  isDefaultBranch,
+  isGithubRemote,
+  parseAzurePr,
+  parseDefaultBranch,
+  parseGitStatus,
+  parseGithubPr,
+  parsePrCreatedAt,
+  parseWorktree,
+  repoRelative,
+  upsertPr,
+} from './work'
+
+/** The pull request (and the repo's default branch) of a branch is read again after this long. */
+const PR_EVERY_MS = 5 * 60_000
+// How far the server's clock may run behind this one: a pull request opened just as the chat began is still the chat's.
+const CLOCK_SLACK_MS = 30_000
+
+// The scan that checks `$.state` references reads the atom from the file that uses it.
+const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
+
+// ── Collection helpers (each one swallows its own failure: a missing datum stays absent) ──
+
+// What the PR read last asked about, and when: the read is repeated for another branch (or ALM target) or after `PR_EVERY_MS`.
+// `asked`: the saved pull requests it read again.
+let lastPrRead: { key: string; at: number; asked: number[] } | undefined
+let isPrReading = false
+
+/** The private config folder of the ALM `identity` (`~/.azure-<identity>`, as hooks/lib/az-pin.js picks it), when it exists. */
+async function azConfigDir($: EngineInterface, identity: string | undefined): Promise<string | undefined> {
+  if (!identity) return undefined
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (!home) return undefined
+  const dir = `${home.replace(/\\/g, '/')}/.azure-${identity}`
+  const stat = await $.fs.stat(dir).catch(() => undefined)
+  return stat?.kind === 'dir' ? dir : undefined
+}
+
+/**
+ * Runs the Azure CLI with `args`, the way the platform can start it (`azArgv`), against the config folder of the ALM identity
+ * when there is one, never the machine-global config. Undefined when the call cannot be made safely.
+ */
+async function runAz($: EngineInterface, args: readonly string[], cwd: string, alm: CockpitAlm | undefined) {
+  // The engine reports no platform: Windows sets `OS` and `ComSpec`.
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT' || (await $.env.get('ComSpec')) !== undefined
+  const argv = azArgv(args, isWindows)
+  if (!argv) return undefined
+  const dir = await azConfigDir($, alm?.identity)
+  return $.process.run(argv, { cwd, timeoutMs: 20_000, ...(dir && { env: { AZURE_CONFIG_DIR: dir } }) })
+}
+
+/**
+ * The latest pull request of `branch` on Azure DevOps, open, completed or abandoned: `az repos pr list`, aimed at the org of the ALM line and the project of the remote,
+ * never at the CLI's configured default. Undefined without an org, a repository or a project to ask about.
+ */
+async function readAzurePr($: EngineInterface, cwd: string, branch: string, url: string, alm: CockpitAlm | undefined): Promise<{ pr: CockpitPr; createdAt?: number } | undefined> {
+  const repo = azureRepo(url)
+  // The repository lives in the project the remote URL names; the ALM project (where the work items are) is only the fallback.
+  const project = repo?.project ?? alm?.project
+  if (!alm?.org || !repo || !project) return undefined
+  const args = ['repos', 'pr', 'list', '--organization', azOrganization(alm.org), '--project', project, '--repository', repo.repo]
+  const list = await runAz($, [...args, '--source-branch', `refs/heads/${branch}`, '--status', 'all', '--top', '1', '--output', 'json'], cwd, alm)
+  const pr = list?.exitCode === 0 ? parseAzurePr(list.stdout) : undefined
+  return pr && list ? { pr, createdAt: parsePrCreatedAt(list.stdout) } : undefined
+}
+
+/** The organization URL `az` is aimed at: the ALM line's `org` as is when it is one, else its name on dev.azure.com. */
+const azOrganization = (org: string): string => (/^https?:\/\//i.test(org) ? org : `https://dev.azure.com/${org}`)
+
+/** A pull request that ended (merged or closed) is not read again. */
+const isPrEnded = (pr: CockpitPr): boolean => pr.state === 'merged' || pr.state === 'closed'
+
+/**
+ * A pull request of the chat read again by its number (its address on GitHub, which also names the repository): `gh pr view` for a GitHub `origin`,
+ * `az repos pr show` for an Azure DevOps one, aimed at the org of the ALM line. Undefined when it cannot be had or answers another pull request.
+ */
+async function readSavedPr($: EngineInterface, cwd: string, remote: string, pr: CockpitPr, alm: CockpitAlm | undefined): Promise<CockpitPr | undefined> {
+  let read: CockpitPr | undefined
+  if (isGithubRemote(remote)) {
+    const view = await $.process.run(['gh', 'pr', 'view', pr.url ?? String(pr.number), '--json', 'number,title,url,state,isDraft'], { cwd, timeoutMs: 10_000 })
+    read = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
+  } else if (isAzureRemote(remote) && alm?.org) {
+    const show = await runAz($, ['repos', 'pr', 'show', '--id', String(pr.number), '--organization', azOrganization(alm.org), '--output', 'json'], cwd, alm)
+    read = show?.exitCode === 0 ? parseAzurePr(show.stdout) : undefined
+  }
+  // A known url must match too: a number alone can name another repo's pull request.
+  return read?.number === pr.number && (pr.url === undefined || read.url === undefined || read.url === pr.url) ? read : undefined
+}
+
+/**
+ * Whether the checkout at `root` is one of the chat's: the one this process started in (`homeRoot`), or one it edited a file in.
+ * A repo only passed through (a `cd` to read) is not, so the PR of its branch never joins the chat.
+ */
+const isRepoOfChat = (root: string | undefined, homeRoot: string | undefined, edited: readonly string[] | undefined) =>
+  Boolean(root) && (homeRoot?.toLowerCase() === root?.toLowerCase() || (edited ?? []).some(p => repoRelative(root, p) !== undefined))
+
+/**
+ * Reads, in the background (never awaited by a refresh or a render), the repo's default branch from `origin/HEAD` and,
+ * off it, the pull request of `branch` when the repo is one of the chat's (`isRepoOfChat`): `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure
+ * DevOps one. One found joins the chat's pull requests, or updates its entry there; no CLI, no PR or a failure adds
+ * nothing. The chat's other pull requests that have not ended are read again by number (`readSavedPr`), so one made in the chat or merged
+ * since shows its state. The result is dropped when the branch has moved on.
+ */
+async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
+  const now = await $.clock.now()
+  const { alm, git, homeRoot, edited, prs, startedAt } = await read($, snapshot)
+  const isChatRepo = isRepoOfChat(git?.root, homeRoot, edited)
+  // The chat's pull requests still to end are read again by number.
+  // Only from a repo of the chat: a number asked in another repo would name another pull request.
+  const pending = isChatRepo ? (prs ?? []).filter(p => !isPrEnded(p)) : []
+  // Whether the repo is the chat's is part of the question: a first edit there asks again at once.
+  const key = `${cwd}\n${branch}\n${alm?.org ?? ''}\n${alm?.project ?? ''}\n${isChatRepo}`
+  // One made in the chat (no state yet) is asked at once, once.
+  const isNewPr = pending.some(p => p.state === undefined && !lastPrRead?.asked.includes(p.number))
+  if (isPrReading || (!isNewPr && lastPrRead?.key === key && now - lastPrRead.at < PR_EVERY_MS)) return
+  isPrReading = true
+  lastPrRead = { key, at: now, asked: pending.map(p => p.number) }
+  try {
+    const base = ['git', '-C', cwd, '--no-optional-locks']
+    const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
+    const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
+    let pr: CockpitPr | undefined
+    let createdAt: number | undefined
+    let remote: string | undefined
+    const isBranchAsked = !isDefaultBranch(branch, defaultBranch) && isChatRepo
+    // The default branch has no pull request of its own to look for, nor has a repo the chat only passes through.
+    if (isBranchAsked || pending.length > 0) {
+      const origin = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
+      remote = origin.exitCode === 0 ? origin.stdout : undefined
+    }
+    if (remote !== undefined && isBranchAsked) {
+      if (isGithubRemote(remote)) {
+        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,url,state,isDraft,createdAt'], { cwd, timeoutMs: 10_000 })
+        pr = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
+        createdAt = view.exitCode === 0 ? parsePrCreatedAt(view.stdout) : undefined
+      } else if (isAzureRemote(remote)) {
+        const found = await readAzurePr($, cwd, branch, remote, alm)
+        pr = found?.pr
+        createdAt = found?.createdAt
+      }
+    }
+    // The branch's pull request joins the chat only when it was opened since the chat began; one already held is updated.
+    const isOfChat = (p: CockpitPr) => (prs ?? []).some(saved => saved.number === p.number) || (createdAt !== undefined && startedAt !== undefined && createdAt >= startedAt - CLOCK_SLACK_MS)
+    if (pr && !isOfChat(pr)) pr = undefined
+    // The others the chat holds (not the one just read), each by its number; one that cannot be read keeps its last state.
+    // Three at a time, so a long list does not wait out each CLI call in turn.
+    const reads: CockpitPr[] = []
+    const others = remote === undefined ? [] : pending.filter(p => p.number !== pr?.number)
+    for (let i = 0; i < others.length; i += 3) {
+      const batch = await Promise.all(others.slice(i, i + 3).map(saved => readSavedPr($, cwd, remote!, saved, alm).catch(() => undefined)))
+      for (const again of batch) if (again) reads.push(again)
+    }
+    await patch($, s => {
+      if (s.cwd !== cwd || s.git?.branch !== branch) return s
+      return { ...s, defaultBranch, prs: reads.reduce(upsertPr, pr ? upsertPr(s.prs, pr) : s.prs) }
+    })
+    // What this read just answered is not new to the next one, even when it carries no state.
+    for (const p of pr ? [...reads, pr] : reads) lastPrRead?.asked.push(p.number)
+  } catch {
+    // the CLI is missing or too slow: no PR is added, and the next read is in `PR_EVERY_MS`
+  } finally {
+    isPrReading = false
+  }
+}
+
+export async function refreshGit($: EngineInterface): Promise<void> {
+  try {
+    const cwd = await $.session.cwd()
+    const base = ['git', '-C', cwd, '--no-optional-locks']
+    const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
+    const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
+    if (!parsed) {
+      return void (await patch($, s => {
+        lastPrRead = undefined
+        // A process that starts outside any repo has no home one ('').
+        return { ...s, cwd, homeRoot: s.homeRoot ?? '', git: undefined, defaultBranch: undefined }
+      }))
+    }
+    const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
+    const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
+    const [, , topLevel] = tree.exitCode === 0 ? tree.stdout.split('\n').map(l => l.trim()) : []
+    await patch($, s => {
+      const isSameRepo = s.cwd === cwd
+      const isSameBranch = isSameRepo && s.git?.branch === parsed.branch
+      // The PR read belongs to the repository and branch it was asked about: leaving them forgets the read too, decided here,
+      // in the patch that clears the default branch, from the state it applies to.
+      if (!isSameBranch) lastPrRead = undefined
+      return {
+        ...s,
+        cwd,
+        homeRoot: s.homeRoot ?? (topLevel || undefined),
+        git: { ...parsed, worktreeRoot, root: topLevel || undefined },
+        defaultBranch: isSameRepo ? s.defaultBranch : undefined,
+      }
+    })
+    if (!parsed.isDetached) void refreshPr($, cwd, parsed.branch).catch(() => undefined)
+  } catch {
+    // git missing or too slow: keep the last reading
+  }
+}

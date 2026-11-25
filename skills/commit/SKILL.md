@@ -1,0 +1,78 @@
+---
+name: commit
+description: >-
+  Use when about to run `git commit`, or the user says "commit" or "committa": writes the message from the diff. Never pushes.
+argument-hint: "[branch] | -b [new-branch] | -m \"message\""
+allowed-tools: Bash(git add*), Bash(git commit*), Bash(git switch*), PowerShell(git add*), PowerShell(git commit*), PowerShell(git switch*)
+---
+
+# commit — one commit, the message generated from the diff
+
+**Contract.** A commit on the intended branch and a four-field report · never pushes, amends,
+rebases, forces or skips hooks · message in the commit language, report in the chat language; identifiers, paths, `AB#<id>`,
+`Fixes #<n>` verbatim.
+
+Arguments: `$ARGUMENTS`
+
+## When
+
+Not for: naming or creating a branch for new work, worktrees, finishing a branch (`branch-flow`);
+pushing or opening a PR (`pr-create`); deciding whether the change is done (the evidence row below).
+
+## Decide
+
+### Argument grammar
+
+| Form | Target |
+| --- | --- |
+| empty | the current branch |
+| `<name>` | the **existing** branch `<name>` (`git switch`, changes carried along); missing → stop and suggest `-b <name>` — a typo must not fork silently |
+| `-b [name]` | a new branch from `HEAD` (`git switch -c`); no name → a short English kebab-case name from the summary (`fix/date-filter`) |
+| `-m "message"` | this exact message; combinable with the above |
+
+### Staging
+
+| State | Commit |
+| --- | --- |
+| something already staged | only the staged changes |
+| nothing staged | tracked changes only (`git add -u`); list untracked files for the user, who names the ones to add |
+| nothing to commit | say so and stop |
+
+List the files before committing, so unrelated work is seen. Target is the default branch → say so
+in the report.
+
+### Message
+
+| Rule | Detail |
+| --- | --- |
+| Imperative in the commit language | `Aggiungi`, `Correggi`, `Sposta` — or the infinitive if `git log --oneline -10` shows the repo uses it; one convention per repo |
+| subject | ~50–72 chars, what changed in which area, not how |
+| body | only for several areas or a non-obvious why: a few `-m` bullet lines |
+| banned | marketing words (`migliora`, `ottimizza`, `potenzia`, robust, seamless), a footer other than an attribution trailer the session or the repo's convention explicitly prescribes |
+
+### Evidence
+
+The change type's evidence line (`plan-work`'s `evidence-by-stack.md`) seen in this session → quote it
+in the report; not seen → commit anyway, `not verified` as `CLAUDE.md` § Done means verified says.
+This skill does not build or test.
+
+## Do
+
+```powershell
+git status --short
+git diff --staged --stat; git diff --stat
+git log --oneline -10                          # the repo's subject style
+git add -u                                     # only when nothing was staged; untracked files are listed, not added
+git commit -m "<subject>" -m "- <body line>"   # -m per paragraph: no heredoc, works in both shells
+git log -1 --format="%h %s"
+```
+
+Report: branch · short hash · files count · the final message (+ the evidence line or
+`not verified`).
+
+## Traps
+
+1. A hook fails the commit → surface its output and stop; never `--no-verify`, never retry around it.
+2. `git switch` refuses because of conflicts → report and stop; never force.
+3. Unrelated tracked files swept in by `git add -u` → the list was not shown → show it before committing.
+4. "committa e pusha" → commit here; the push is a separate, explicit act (`pr-create`, `branch-flow`).

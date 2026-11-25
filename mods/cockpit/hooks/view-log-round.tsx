@@ -1,0 +1,147 @@
+import type { CockpitLogEntry, CockpitSnapshot } from '../types'
+import type { DoneEvent, DoneGroup } from './done-groups'
+import { COLORS, baseName, effortGlyph, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
+import type { Span } from './shared'
+import { isLinkShown } from './round-anchor'
+import { notificationLabel } from './round-capture'
+import { t } from './strings'
+import { pairRow } from './view-agents'
+import { dim, sp } from './view-base'
+
+/** A round's tools in the summary: the top three. */
+const TOP_TOOLS = 3
+/** The files a round's row names; the rest is a count. */
+const FILES_SHOWN = 3
+/** The cells of a node's label. */
+export const LABEL_W = 10
+
+type Node = DoneGroup<DoneEvent>
+
+/** The LOG filter's state key (per session, like the other toggles): set, the log shows everything; unset, only the main rows. */
+export const ALL_KEY = 'log:all'
+export const isAllShown = (s: CockpitSnapshot): boolean => s.openKeys?.includes(ALL_KEY) === true
+
+/** Whether a log entry is a main row: a failed test or a blocking signal stays, an ok test and any other signal wait for the full log. */
+export const isMainEntry = (e: CockpitLogEntry): boolean => (e.kind === 'test' ? e.isFailed === true : e.kind === 'signal' ? e.severity === 'block' : true)
+
+/** What a round's header, summary and files row read: the entry of a closed round, the session's pending fields for the open one. */
+type Facts = Pick<CockpitLogEntry, 'prompt' | 'files' | 'fails' | 'waits' | 'ctxPct' | 'model' | 'effort' | 'anchor'> & { ctxDelta?: number }
+
+/** The facts of a round node; none for a flow and a merged run of chat-only rounds. */
+function roundFacts(g: Node, s: CockpitSnapshot): Facts | undefined {
+  if (g.flow !== undefined || g.chatOnly !== undefined) return undefined
+  if (!g.isCurrent) return g.entry === undefined ? undefined : { ...g.entry, ...(g.ctxDelta !== undefined && { ctxDelta: g.ctxDelta }) }
+  const log = s.sessionLog ?? []
+  const last = log.filter(e => e.kind === 'round').at(-1)
+  const ctxPct = s.ctx.percent === undefined ? undefined : Math.round(s.ctx.percent)
+  const isCompacted = last !== undefined && log.some(e => e.kind === 'compact' && e.at > last.at)
+  return {
+    ...(s.roundPrompt !== undefined && { prompt: s.roundPrompt }),
+    ...(s.roundAnchor !== undefined && { anchor: s.roundAnchor }),
+    ...(s.roundFiles !== undefined && { files: s.roundFiles }),
+    ...(s.roundFails !== undefined && { fails: s.roundFails }),
+    ...(s.roundWaits !== undefined && { waits: s.roundWaits }),
+    ...(ctxPct !== undefined && { ctxPct }),
+    ...(ctxPct !== undefined && last?.ctxPct !== undefined && !isCompacted && { ctxDelta: ctxPct - last.ctxPct }),
+    ...(s.model !== undefined && { model: s.model }),
+    ...(s.effort !== undefined && { effort: s.effort }),
+  }
+}
+
+/** `1m10s`, `45s`: a wait's length. */
+const waitText = (ms: number): string => {
+  const sec = Math.max(0, Math.round(ms / 1000))
+  return sec >= 60 ? `${Math.floor(sec / 60)}m${String(sec % 60).padStart(2, '0')}s` : `${sec}s`
+}
+
+/** The summary of a node, in spans: what it holds by kind (`2 agents · 1 commit`), its failed calls (red) and permission waits, then its tool calls (`34 tools: Read 20 · Bash 9 · Edit 5`, the top three); empty when it holds nothing. */
+export function summarySpans(g: Node, s: CockpitSnapshot): Span[] {
+  const S = t().page.events.summary
+  const facts = roundFacts(g, s)
+  const kinds = (['agent', 'signal', 'commit', 'test', 'pr', 'compact'] as const).flatMap(kind => {
+    const n = g.events.filter(e => e.kind === kind).length
+    return n > 0 ? [dim(S[kind](n))] : []
+  })
+  const tools = Object.entries(g.tools ?? {}).sort((a, b) => b[1] - a[1])
+  const total = tools.reduce((n, [, count]) => n + count, 0)
+  const top = tools.slice(0, TOP_TOOLS).map(([name, count]) => `${name} ${count}`).join(' · ')
+  const fails = facts?.fails !== undefined && facts.fails.n > 0 ? [sp(S.fails(facts.fails.n), COLORS.red)] : []
+  const waits = facts?.waits !== undefined && facts.waits.n > 0 ? [sp(S.waits(facts.waits.n, waitText(facts.waits.ms)), COLORS.amber)] : []
+  return [...kinds, ...fails, ...waits, ...(total > 0 && isAllShown(s) ? [dim(S.tools(total, top))] : [])].flatMap((span, i) => (i === 0 ? [span] : [dim(' · '), span]))
+}
+
+/** `file a · b · c +1`: the files the round edited, by name; none when it edited none. */
+export function filesText(g: Node, s: CockpitSnapshot): string | undefined {
+  const files = roundFacts(g, s)?.files ?? []
+  if (files.length === 0) return undefined
+  const extra = files.length - FILES_SHOWN
+  return `${t().page.events.files} ${files.slice(0, FILES_SHOWN).map(baseName).join(' · ')}${extra > 0 ? ` +${extra}` : ''}`
+}
+
+/** A round's link: its marker, and whether it scrolls (this process placed it and no scroll was refused); none when the round has no marker. */
+export function roundLink(g: Node, s: CockpitSnapshot): { anchor: string; isLive: boolean } | undefined {
+  const anchor = roundFacts(g, s)?.anchor
+  return anchor === undefined ? undefined : { anchor, isLive: isLinkShown(anchor) }
+}
+
+/** The markers the session's rounds hold, the open one's too: what the reason line under LOG is asked about. */
+export const roundAnchors = (s: CockpitSnapshot): string[] => [...(s.sessionLog ?? []).flatMap(e => (e.kind === 'round' && e.anchor !== undefined ? [e.anchor] : [])), ...(s.roundAnchor === undefined ? [] : [s.roundAnchor])]
+
+/** A failed call's row: the tool and its error text, red. */
+const failRow = (f: { tool: string; text: string }, text: string): Span[] => [sp(`${f.tool}${text === '' ? '' : `: ${text}`}`, COLORS.red)]
+
+/**
+ * The rows under a round's summary: the newest failed call, its first line (the base view), or the full log's rows: each permission wait (tool, length)
+ * and each failed call (tool, error), the newest ten of each.
+ */
+export function detailRows(g: Node, s: CockpitSnapshot): Span[][] {
+  const facts = roundFacts(g, s)
+  const fails = facts?.fails?.list ?? []
+  if (!isAllShown(s)) {
+    const last = fails.at(-1)
+    return last === undefined ? [] : [failRow(last, (last.text.split(/\r?\n/)[0] ?? '').replace(/\s+/g, ' ').trim())]
+  }
+  return [
+    ...(facts?.waits?.list ?? []).map(w => [dim(`${w.tool} ${t().page.events.wait} ${waitText(w.ms)}`)]),
+    ...fails.map(f => failRow(f, f.text.replace(/\s+/g, ' '))),
+  ]
+}
+
+/** Whether a node holds anything to open: events, or for a round a summary or a files row. */
+export const isExpandable = (g: Node, s: CockpitSnapshot): boolean => g.events.length > 0 || summarySpans(g, s).length > 0 || filesText(g, s) !== undefined
+
+/** `son5.5` and the effort battery (an effort with no battery, its value), whichever there is; the model cell of an agent row and of a round header. */
+export function modelSpans(model: string | undefined, effort: string | number | undefined): Span[] {
+  const name = shortModel(model).replace(' ', '')
+  const battery = effortGlyph(effort)
+  const tail = battery ? [sp(battery.icon, battery.color)] : effort === undefined ? [] : [dim(String(effort))]
+  return [...(name === '' ? [] : [dim(name)]), ...(name !== '' && tail.length > 0 ? [sp(' ')] : []), ...tail]
+}
+
+/** `ctx 42% +12`: the context at the round's end and what it gained; the change is left out after a compaction. */
+const ctxText = (pct: number, delta: number | undefined): string => `ctx ${pct}%${delta === undefined ? '' : ` ${delta < 0 ? '−' : '+'}${Math.abs(delta)}`}`
+
+/** The prompt keeps at least this many cells before the details after it give way. */
+const MIN_PROMPT_W = 8
+
+/**
+ * The header of a round node, beside its arrow, on one row: start time, label, the prompt cut with an ellipsis, the context, the model and its effort battery,
+ * and `figures` (length, cost, share) at the row's end. A narrow pane cuts the details, never wraps them. `width` is the row's, less the link's 2 cells when it has one.
+ */
+export function roundHeader(g: Node, s: CockpitSnapshot, parts: { time: Span[]; label: Span; figures: Span[]; width: number }): Span[] | undefined {
+  const facts = roundFacts(g, s)
+  // a round saved before the log kept its prompt, context and model keeps its one line
+  if (facts === undefined || (facts.prompt === undefined && facts.ctxPct === undefined && facts.model === undefined)) return undefined
+  const { time, label, figures, width } = parts
+  const lead = [...time, { ...label, t: label.t.padEnd(LABEL_W) }]
+  const cells: Span[][] = [
+    ...(facts.ctxPct === undefined ? [] : [[dim(ctxText(facts.ctxPct, facts.ctxDelta))]]),
+    ...(facts.model === undefined && facts.effort === undefined ? [] : [modelSpans(facts.model, facts.effort)]),
+  ]
+  const details = cells.flatMap((c, i) => [...(i > 0 ? [sp(' ')] : []), ...c])
+  const room = width - 2 - spanWidth(lead) - 1 - (figures.length > 0 ? spanWidth(figures) + 1 : 0) - (details.length > 0 ? spanWidth(details) + 1 : 0)
+  // an entry kept before the label existed holds the raw tag: it is labelled here, in the language of the moment
+  const prompt = facts.prompt === undefined ? [] : [sp(' '), sp(truncEnd(notificationLabel(facts.prompt) ?? facts.prompt, Math.max(room, MIN_PROMPT_W)))]
+  const left = [...lead, ...prompt, ...(details.length > 0 ? [sp(' '), ...details] : [])]
+  return figures.length === 0 ? truncateSpans(left, width - 2) : pairRow(left, figures, width - 2)
+}
